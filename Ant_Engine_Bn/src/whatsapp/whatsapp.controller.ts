@@ -1,0 +1,71 @@
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpException, HttpStatus, Param, Post } from '@nestjs/common';
+import { WhatsappService } from './whatsapp.service';
+import { MetaCloudService } from '../meta-cloud/meta-cloud.service';
+import { InstanceIdDto, SendDto } from './dto';
+
+const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function assertValidInstanceId(instanceId: string): void {
+  if (!INSTANCE_ID_PATTERN.test(instanceId)) {
+    throw new BadRequestException('instanceId inválido');
+  }
+}
+
+@Controller()
+export class WhatsappController {
+  constructor(
+    private readonly whatsappService: WhatsappService,
+    private readonly metaCloudService: MetaCloudService,
+  ) {}
+
+  // Contrato consumido pelo worker (Ant_MSG_Bn/src/engine/engine.service.ts)
+  // engine.service.ts checa response.status === 200, entao nao pode ser o 201 default do Nest para POST
+  //
+  // Roteamento: instanceIds registrados em META_INSTANCES vao para a Meta Cloud API
+  // (numero oficial, sem risco de ban); o resto continua no Baileys. O worker nao sabe
+  // nem precisa saber a diferenca - mesma fila, mesmo contrato.
+  @Post('send')
+  @HttpCode(200)
+  async send(@Body() body: SendDto) {
+    try {
+      if (this.metaCloudService.hasInstance(body.instanceId)) {
+        return await this.metaCloudService.sendMessage(body.instanceId, body.to, body.text);
+      }
+      return await this.whatsappService.sendMessage(body.instanceId, body.to, body.text);
+    } catch (err) {
+      throw new HttpException(err.message, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  @Get('status/:instanceId')
+  status(@Param('instanceId') instanceId: string) {
+    assertValidInstanceId(instanceId);
+    if (this.metaCloudService.hasInstance(instanceId)) {
+      return this.metaCloudService.getStatus(instanceId);
+    }
+    return this.whatsappService.getStatus(instanceId);
+  }
+
+  @Post('reconnect')
+  @HttpCode(200)
+  reconnect(@Body() body: InstanceIdDto) {
+    // Meta Cloud API nao tem sessao pra "reconectar" - so reflete o status atual do numero
+    if (this.metaCloudService.hasInstance(body.instanceId)) {
+      return this.metaCloudService.getStatus(body.instanceId);
+    }
+    return this.whatsappService.reconnect(body.instanceId);
+  }
+
+  // Endpoints de gestao/pareamento (usados por uma futura tela de onboarding, ou manualmente)
+  // Nao se aplicam a instancias Meta Cloud API (nao ha QR code / pareamento).
+  @Post('instances/:instanceId/connect')
+  connect(@Param('instanceId') instanceId: string) {
+    assertValidInstanceId(instanceId);
+    return this.whatsappService.connectInstance(instanceId);
+  }
+
+  @Get('instances')
+  list() {
+    return this.whatsappService.listInstances();
+  }
+}

@@ -1,0 +1,165 @@
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as path from 'path';
+import * as QRCode from 'qrcode';
+import { pino } from 'pino';
+import { Boom } from '@hapi/boom';
+import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, WASocket } from '@whiskeysockets/baileys';
+import { useEncryptedMultiFileAuthState } from './encrypted-auth-state';
+
+export type InstanceStatus = 'connecting' | 'qr_code' | 'connected' | 'disconnected';
+
+interface InstanceRecord {
+  sock: WASocket;
+  status: InstanceStatus;
+  qr?: string;
+}
+
+@Injectable()
+export class WhatsappService implements OnModuleDestroy {
+  private readonly logger = new Logger(WhatsappService.name);
+  private readonly instances = new Map<string, InstanceRecord>();
+  // evita duas conexoes concorrentes para a mesma instancia (ex: dois /connect quase simultaneos)
+  private readonly connecting = new Map<string, Promise<{ status: InstanceStatus; qr?: string }>>();
+
+  constructor(private configService: ConfigService) {}
+
+  onModuleDestroy() {
+    for (const { sock } of this.instances.values()) {
+      sock.end(undefined);
+    }
+  }
+
+  async connectInstance(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+    const existing = this.instances.get(instanceId);
+    if (existing && (existing.status === 'connected' || existing.status === 'connecting')) {
+      return { status: existing.status, qr: existing.qr };
+    }
+
+    const inFlight = this.connecting.get(instanceId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = this.openConnection(instanceId);
+    this.connecting.set(instanceId, promise);
+    try {
+      return await promise;
+    } finally {
+      this.connecting.delete(instanceId);
+    }
+  }
+
+  private async openConnection(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+    const sessionsDir = this.configService.get<string>('sessionsDir');
+    const authDir = path.join(sessionsDir, instanceId);
+    const { state, saveCreds } = await useEncryptedMultiFileAuthState(authDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+      version,
+      auth: state,
+      logger: pino({ level: this.configService.get<string>('logLevel') }) as any,
+      printQRInTerminal: false,
+      browser: ['Anti-Ban', 'Chrome', '1.0.0'],
+    });
+
+    const record: InstanceRecord = { sock, status: 'connecting' };
+    this.instances.set(instanceId, record);
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        record.qr = await QRCode.toDataURL(qr);
+        record.status = 'qr_code';
+        this.logger.log(`Instância ${instanceId}: QR code gerado, aguardando pareamento`);
+      }
+
+      if (connection === 'open') {
+        record.status = 'connected';
+        record.qr = undefined;
+        this.logger.log(`Instância ${instanceId}: conectada`);
+      }
+
+      if (connection === 'close') {
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+
+        record.status = 'disconnected';
+        this.logger.warn(
+          `Instância ${instanceId}: desconectada (statusCode=${statusCode}, loggedOut=${loggedOut})`,
+        );
+
+        if (loggedOut) {
+          this.instances.delete(instanceId);
+        } else {
+          this.connectInstance(instanceId).catch((err) =>
+            this.logger.error(`Falha ao reconectar ${instanceId}: ${err.message}`),
+          );
+        }
+      }
+    });
+
+    // aguarda o primeiro evento relevante (qr pronto, conectado, ou fechado) antes de responder
+    return new Promise((resolve) => {
+      const check = () => {
+        const current = this.instances.get(instanceId);
+        if (!current) {
+          resolve({ status: 'disconnected' });
+          return;
+        }
+        if (current.status !== 'connecting') {
+          resolve({ status: current.status, qr: current.qr });
+          return;
+        }
+        setTimeout(check, 200);
+      };
+      setTimeout(check, 200);
+    });
+  }
+
+  async getStatus(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+    const instance = this.instances.get(instanceId);
+    if (!instance) {
+      return { status: 'disconnected' };
+    }
+    return { status: instance.status, qr: instance.qr };
+  }
+
+  async reconnect(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+    const existing = this.instances.get(instanceId);
+    if (existing) {
+      existing.sock.end(undefined);
+      this.instances.delete(instanceId);
+    }
+    return this.connectInstance(instanceId);
+  }
+
+  async sendMessage(instanceId: string, to: string, text: string): Promise<{ messageId: string }> {
+    const instance = this.instances.get(instanceId);
+    if (!instance || instance.status !== 'connected') {
+      throw new Error(`Instance ${instanceId} is not connected`);
+    }
+
+    const jid = this.toJid(to);
+    const result = await instance.sock.sendMessage(jid, { text });
+
+    return { messageId: result?.key?.id };
+  }
+
+  listInstances(): { instanceId: string; status: InstanceStatus }[] {
+    return Array.from(this.instances.entries()).map(([instanceId, { status }]) => ({
+      instanceId,
+      status,
+    }));
+  }
+
+  private toJid(to: string): string {
+    if (to.includes('@')) return to;
+    const digits = to.replace(/\D/g, '');
+    return `${digits}@s.whatsapp.net`;
+  }
+}
