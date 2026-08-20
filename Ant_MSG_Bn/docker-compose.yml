@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: antiban-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-wa_saas}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - antiban_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-wa_saas}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: antiban-redis
+    restart: unless-stopped
+    command: redis-server --requirepass "${REDIS_PASSWORD:-}"
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - antiban_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  engine:
+    build:
+      context: ../Ant_Engine_Bn
+    container_name: antiban-engine
+    restart: unless-stopped
+    # segredos (ENGINE_API_KEY, SESSIONS_ENCRYPTION_KEY, META_INSTANCES) vem do
+    # proprio .env do engine - nao duplicar aqui
+    env_file:
+      - ../Ant_Engine_Bn/.env
+    environment:
+      ENGINE_PORT: 3001
+      SESSIONS_DIR: /app/sessions
+    ports:
+      # exposto direto no host so pra facilitar o dev local (worker ainda roda fora
+      # do Docker). Em produção, remova esse mapeamento e deixe só o Caddy publico -
+      # o worker, quando containerizado, deve falar com "engine:3001" pela rede
+      # interna do compose, sem passar pela internet.
+      - "${ENGINE_PORT:-3001}:3001"
+    volumes:
+      - antiban_engine_sessions:/app/sessions
+
+  crm-api:
+    build:
+      context: ../Ant_CRM_Bn
+    container_name: antiban-crm-api
+    restart: unless-stopped
+    # segredos (CRM_JWT_SECRET, CRM_ADMIN_*, ENGINE_API_KEY) vem do proprio .env
+    # do CRM - nao duplicar aqui
+    env_file:
+      - ../Ant_CRM_Bn/.env
+    environment:
+      CRM_PORT: 3002
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      ENGINE_API_URL: http://engine:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      engine:
+        condition: service_started
+    ports:
+      # exposto direto no host so pra facilitar o dev local (frontend ainda roda
+      # fora do Docker). Em produção, remova esse mapeamento e deixe só o Caddy
+      # publico - o frontend, quando containerizado, deve falar com
+      # "crm-api:3002" pela rede interna do compose, sem passar pela internet.
+      - "${CRM_PORT:-3002}:3002"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: antiban-caddy
+    restart: unless-stopped
+    depends_on:
+      - engine
+    environment:
+      ENGINE_DOMAIN: ${ENGINE_DOMAIN:-localhost}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-admin@example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - antiban_caddy_data:/data
+      - antiban_caddy_config:/config
+
+volumes:
+  antiban_postgres_data:
+  antiban_redis_data:
+  antiban_engine_sessions:
+  antiban_caddy_data:
+  antiban_caddy_config:

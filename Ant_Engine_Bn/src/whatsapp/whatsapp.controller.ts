@@ -68,4 +68,17 @@ export class WhatsappController {
   list() {
     return this.whatsappService.listInstances();
   }
+
+  // Confere se um numero existe de verdade no WhatsApp antes de mandar qualquer coisa -
+  // util pra diagnosticar formato errado (DDI/DDD faltando etc), ja que o send nao falha
+  // sozinho quando o JID nao corresponde a ninguem.
+  @Get('instances/:instanceId/check/:to')
+  async check(@Param('instanceId') instanceId: string, @Param('to') to: string) {
+    assertValidInstanceId(instanceId);
+    try {
+      return await this.whatsappService.checkNumber(instanceId, to);
+    } catch (err) {
+      throw new HttpException(err.message, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
 }

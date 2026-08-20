@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* dark: passa a reagir a uma classe "dark" no <html> (controlada por
+   src/lib/theme.ts), em vez de só seguir prefers-color-scheme do SO */
+@custom-variant dark (&:where(.dark, .dark *));
+
+body {
+  margin: 0;
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+}

@@ -144,10 +144,38 @@ export class WhatsappService implements OnModuleDestroy {
       throw new Error(`Instance ${instanceId} is not connected`);
     }
 
-    const jid = this.toJid(to);
+    const jid = await this.resolveJid(instance, to);
     const result = await instance.sock.sendMessage(jid, { text });
 
     return { messageId: result?.key?.id };
+  }
+
+  async checkNumber(instanceId: string, to: string): Promise<{ exists: boolean; jid?: string }> {
+    const instance = this.instances.get(instanceId);
+    if (!instance || instance.status !== 'connected') {
+      throw new Error(`Instance ${instanceId} is not connected`);
+    }
+
+    const digits = to.replace(/\D/g, '');
+    const [result] = (await instance.sock.onWhatsApp(digits)) || [];
+    return { exists: !!result?.exists, jid: result?.jid };
+  }
+
+  // O Baileys nao valida se o numero existe antes de "enviar" - sock.sendMessage()
+  // resolve normalmente mesmo pra um JID que nao corresponde a nenhuma conta real
+  // (a mensagem so nunca chega). Por isso confirmamos via onWhatsApp antes de mandar,
+  // em vez de so montar "digits@s.whatsapp.net" e confiar.
+  private async resolveJid(instance: InstanceRecord, to: string): Promise<string> {
+    if (to.includes('@')) return to;
+
+    const digits = to.replace(/\D/g, '');
+    const [result] = (await instance.sock.onWhatsApp(digits)) || [];
+
+    if (!result?.exists) {
+      throw new Error(`Número ${to} não está registrado no WhatsApp (verificado via onWhatsApp)`);
+    }
+
+    return result.jid;
   }
 
   listInstances(): { instanceId: string; status: InstanceStatus }[] {
@@ -155,11 +183,5 @@ export class WhatsappService implements OnModuleDestroy {
       instanceId,
       status,
     }));
-  }
-
-  private toJid(to: string): string {
-    if (to.includes('@')) return to;
-    const digits = to.replace(/\D/g, '');
-    return `${digits}@s.whatsapp.net`;
   }
 }
