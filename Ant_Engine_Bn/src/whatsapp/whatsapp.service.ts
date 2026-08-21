@@ -156,6 +156,17 @@ export class WhatsappService implements OnModuleDestroy {
   }
 
   async reconnect(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+    // Se ja tem uma conexao em andamento (ex: outro job do worker, processando
+    // em paralelo pra essa mesma instancia, pediu reconnect ao mesmo tempo),
+    // so espera ela em vez de matar o socket no meio do handshake - sem essa
+    // checagem, N chamadas concorrentes ficavam derrubando e recriando a
+    // conexao umas das outras em loop (visto em producao: disparo em rajada
+    // derrubando a instancia por alguns segundos logo apos o pareamento).
+    const inFlight = this.connecting.get(instanceId);
+    if (inFlight) {
+      return inFlight;
+    }
+
     const existing = this.instances.get(instanceId);
     if (existing) {
       existing.sock.end(undefined);
