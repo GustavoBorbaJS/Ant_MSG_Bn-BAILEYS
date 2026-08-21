@@ -8,7 +8,8 @@
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "npm run typeorm -- migration:generate -d src/database/data-source.ts",
     "migration:run": "npm run typeorm -- migration:run -d src/database/data-source.ts",
-    "migration:revert": "npm run typeorm -- migration:revert -d src/database/data-source.ts"
+    "migration:revert": "npm run typeorm -- migration:revert -d src/database/data-source.ts",
+    "migration:run:prod": "typeorm migration:run -d dist/database/data-source.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

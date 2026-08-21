@@ -7,6 +7,11 @@ import { User } from './entities/user.entity';
 
 // Usado só pelo CLI do TypeORM (migration:generate/run/revert) - a aplicação em
 // si usa o DatabaseModule (database.module.ts), não este arquivo.
+// __filename termina em ".js" quando compilado (dist/, produção/Docker - sem
+// ts-node) e ".ts" rodando via ts-node (dev, "npm run migration:run") - usa
+// isso pra apontar pro glob de migrations certo nos dois casos.
+const isCompiled = __filename.endsWith('.js');
+
 export default new DataSource({
   type: 'postgres',
   host: process.env.DB_HOST || 'localhost',
@@ -15,6 +20,6 @@ export default new DataSource({
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_NAME || 'wa_saas',
   entities: [Contact, Campaign, MessageLog, User],
-  migrations: ['src/database/migrations/*.ts'],
+  migrations: [isCompiled ? 'dist/database/migrations/*.js' : 'src/database/migrations/*.ts'],
   synchronize: false,
 });
