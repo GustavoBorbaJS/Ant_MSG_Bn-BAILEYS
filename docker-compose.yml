@@ -91,8 +91,12 @@ services:
     restart: unless-stopped
     depends_on:
       - crm-api
-    # porta interna 80 (nginx) - configure o dominio dessa app na UI do
-    # Dokploy apontando pra esse servico/porta (Traefik cuida do HTTPS)
+    # ${CRM_WEB_PORT:-8080} publicado direto no host - acesso via
+    # http://IP-DA-VM:8080 enquanto nao tem dominio configurado. Depois que
+    # tiver dominio de verdade, pode tirar essa linha e configurar via
+    # Domains na UI do Dokploy (Traefik cuida do HTTPS) em vez de porta solta.
+    ports:
+      - "${CRM_WEB_PORT:-8080}:80"
 
   msg-worker:
     build:
