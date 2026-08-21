@@ -33,13 +33,17 @@ services:
       context: ./Ant_Engine_Bn
     container_name: antiban-engine
     restart: unless-stopped
-    # segredos (ENGINE_API_KEY, SESSIONS_ENCRYPTION_KEY, META_INSTANCES) vem do
-    # proprio .env do engine - nao duplicar aqui
-    env_file:
-      - ./Ant_Engine_Bn/.env
+    # Nao usa env_file (./Ant_Engine_Bn/.env nao existe no servidor - fica de
+    # fora do git de proposito). Todo valor vem do UNICO .env na raiz desse
+    # compose (o que voce configura no campo "Environment" do Dokploy).
     environment:
       ENGINE_PORT: 3001
+      ENGINE_API_KEY: ${ENGINE_API_KEY}
+      SESSIONS_ENCRYPTION_KEY: ${SESSIONS_ENCRYPTION_KEY}
       SESSIONS_DIR: /app/sessions
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      META_API_VERSION: ${META_API_VERSION:-v21.0}
+      META_INSTANCES: ${META_INSTANCES:-}
     volumes:
       - antiban_engine_sessions:/app/sessions
 
@@ -48,15 +52,30 @@ services:
       context: ./Ant_CRM_Bn
     container_name: antiban-crm-api
     restart: unless-stopped
-    # segredos (CRM_JWT_SECRET, CRM_ADMIN_*, ENGINE_API_KEY) vem do proprio .env
-    # do CRM - nao duplicar aqui
-    env_file:
-      - ./Ant_CRM_Bn/.env
     environment:
       CRM_PORT: 3002
       DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-wa_saas}
       REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       ENGINE_API_URL: http://engine:3001
+      ENGINE_API_KEY: ${ENGINE_API_KEY}
+      WORKER_RETRY_ATTEMPTS: ${WORKER_RETRY_ATTEMPTS:-3}
+      WORKER_RETRY_DELAY: ${WORKER_RETRY_DELAY:-5000}
+      ANTIBAN_WARMUP_DAYS_TO_WARM: ${ANTIBAN_WARMUP_DAYS_TO_WARM:-3}
+      ANTIBAN_WARMUP_DAYS_TO_HOT: ${ANTIBAN_WARMUP_DAYS_TO_HOT:-7}
+      ANTIBAN_TRUSTED_INSTANCES: ${ANTIBAN_TRUSTED_INSTANCES:-}
+      CRM_ADMIN_USERNAME: ${CRM_ADMIN_USERNAME:-admin}
+      CRM_ADMIN_EMAIL: ${CRM_ADMIN_EMAIL}
+      # bcrypt (formato $2a$10$...) - no .env da raiz, duplique cada "$" pra
+      # "$$" (ver .env.example), senao o Compose corrompe o valor.
+      CRM_ADMIN_PASSWORD_HASH: ${CRM_ADMIN_PASSWORD_HASH}
+      CRM_JWT_SECRET: ${CRM_JWT_SECRET}
+      CRM_JWT_EXPIRES_IN: ${CRM_JWT_EXPIRES_IN:-24h}
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,13 +99,27 @@ services:
       context: ./Ant_MSG_Bn
     container_name: antiban-msg-worker
     restart: unless-stopped
-    # segredos (ENGINE_API_KEY) vem do proprio .env do worker - nao duplicar aqui
-    env_file:
-      - ./Ant_MSG_Bn/.env
     environment:
       DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-wa_saas}
       REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       ENGINE_API_URL: http://engine:3001
+      ENGINE_API_KEY: ${ENGINE_API_KEY}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
+      WORKER_RETRY_ATTEMPTS: ${WORKER_RETRY_ATTEMPTS:-3}
+      WORKER_RETRY_DELAY: ${WORKER_RETRY_DELAY:-5000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ANTIBAN_MIN_DELAY_MS: ${ANTIBAN_MIN_DELAY_MS:-2000}
+      ANTIBAN_MAX_DELAY_MS: ${ANTIBAN_MAX_DELAY_MS:-6000}
+      ANTIBAN_WARMUP_DAYS_TO_WARM: ${ANTIBAN_WARMUP_DAYS_TO_WARM:-3}
+      ANTIBAN_WARMUP_DAYS_TO_HOT: ${ANTIBAN_WARMUP_DAYS_TO_HOT:-7}
+      ANTIBAN_TRUSTED_INSTANCES: ${ANTIBAN_TRUSTED_INSTANCES:-}
+      ANTIBAN_GLOBAL_DAILY_LIMIT: ${ANTIBAN_GLOBAL_DAILY_LIMIT:-1000}
     depends_on:
       postgres:
         condition: service_healthy
