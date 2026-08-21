@@ -1,4 +1,15 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpException, HttpStatus, Param, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpException,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { MetaCloudService } from '../meta-cloud/meta-cloud.service';
 import { InstanceIdDto, SendDto } from './dto';
@@ -67,6 +78,20 @@ export class WhatsappController {
   @Get('instances')
   list() {
     return this.whatsappService.listInstances();
+  }
+
+  // Apaga a sessao (nao e so um reconnect) - pra desatolar uma instancia
+  // presa numa sessao morta/invalida, sem precisar entrar no servidor.
+  // Nao se aplica a Meta Cloud API (nao tem sessao local pra limpar).
+  @Delete('instances/:instanceId')
+  @HttpCode(200)
+  async reset(@Param('instanceId') instanceId: string) {
+    assertValidInstanceId(instanceId);
+    if (this.metaCloudService.hasInstance(instanceId)) {
+      throw new BadRequestException('Instâncias Meta Cloud API não têm sessão local pra limpar');
+    }
+    await this.whatsappService.resetInstance(instanceId);
+    return { status: 'disconnected' };
   }
 
   // Confere se um numero existe de verdade no WhatsApp antes de mandar qualquer coisa -

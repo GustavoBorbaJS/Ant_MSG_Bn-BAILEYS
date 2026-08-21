@@ -37,16 +37,34 @@ export function InstancesPage() {
   const connectMutation = useMutation({
     mutationFn: (instanceId: string) => api.post(`/instances/${instanceId}/connect`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['instances'] }),
+    onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível conectar essa instância.'),
   });
 
   const reconnectMutation = useMutation({
     mutationFn: (instanceId: string) => api.post(`/instances/${instanceId}/reconnect`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['instances'] }),
+    onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível reconectar essa instância.'),
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: (instanceId: string) => api.delete(`/instances/${instanceId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['instances'] }),
+    onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível limpar a sessão dessa instância.'),
   });
 
   function startPairing(instanceId: string) {
     setPairingId(instanceId);
     connectMutation.mutate(instanceId);
+  }
+
+  function handleReset(instanceId: string) {
+    if (
+      confirm(
+        `Limpar a sessão de "${instanceId}"? O WhatsApp desconectado ficará desvinculado - vai precisar escanear um QR code novo pra reconectar.`,
+      )
+    ) {
+      resetMutation.mutate(instanceId);
+    }
   }
 
   return (
@@ -110,9 +128,15 @@ export function InstancesPage() {
                   </button>
                   <button
                     onClick={() => reconnectMutation.mutate(instance.instanceId)}
-                    className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                    className="mr-2 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
                   >
                     Reconectar
+                  </button>
+                  <button
+                    onClick={() => handleReset(instance.instanceId)}
+                    className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                  >
+                    Limpar sessão
                   </button>
                 </td>
               </tr>

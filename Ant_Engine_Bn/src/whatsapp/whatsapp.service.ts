@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
+import { rm } from 'fs/promises';
 import * as QRCode from 'qrcode';
 import { pino } from 'pino';
 import { Boom } from '@hapi/boom';
@@ -95,6 +96,14 @@ export class WhatsappService implements OnModuleDestroy {
 
         if (loggedOut) {
           this.instances.delete(instanceId);
+          // WhatsApp invalidou a sessão do lado deles (401) - sem isso, a
+          // proxima tentativa de conectar carregava a MESMA sessão morta do
+          // disco e falhava de novo, em loop, sem nunca gerar QR novo pra
+          // repareamento. Apaga a sessao inteira: so credenciais mortas ficam
+          // pra tras mesmo, nao tem o que reaproveitar depois de um loggedOut.
+          rm(authDir, { recursive: true, force: true }).catch((err) =>
+            this.logger.error(`Falha ao limpar sessão de ${instanceId} após logout: ${err.message}`),
+          );
         } else {
           this.connectInstance(instanceId).catch((err) =>
             this.logger.error(`Falha ao reconectar ${instanceId}: ${err.message}`),
@@ -119,6 +128,23 @@ export class WhatsappService implements OnModuleDestroy {
       };
       setTimeout(check, 200);
     });
+  }
+
+  // Apaga a sessão de propósito (não é só reconnect) - pra quando a instância
+  // fica presa numa sessão morta/invalida por qualquer motivo (401 do
+  // WhatsApp, chave de criptografia trocada, etc) e o usuário precisa
+  // reparear do zero sem depender de alguém entrar no servidor pra apagar
+  // arquivo a mão.
+  async resetInstance(instanceId: string): Promise<void> {
+    const existing = this.instances.get(instanceId);
+    if (existing) {
+      existing.sock.end(undefined);
+      this.instances.delete(instanceId);
+    }
+
+    const sessionsDir = this.configService.get<string>('sessionsDir');
+    const authDir = path.join(sessionsDir, instanceId);
+    await rm(authDir, { recursive: true, force: true });
   }
 
   async getStatus(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {

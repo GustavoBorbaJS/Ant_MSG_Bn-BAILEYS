@@ -46,4 +46,9 @@ export class EngineClientService {
     const response = await this.axios.get(`/instances/${instanceId}/check/${to}`);
     return response.data;
   }
+
+  async resetInstance(instanceId: string): Promise<{ status: string }> {
+    const response = await this.axios.delete(`/instances/${instanceId}`);
+    return response.data;
+  }
 }

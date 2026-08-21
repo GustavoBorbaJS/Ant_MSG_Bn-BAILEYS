@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { BadRequestException, Controller, Delete, Get, Param, Post, Req } from '@nestjs/common';
 import { EngineClientService } from './engine-client.service';
 import { AntibanReadonlyService } from '../antiban-readonly/antiban-readonly.service';
 import { InstanceOwnersService } from '../instance-owners/instance-owners.service';
@@ -77,5 +77,16 @@ export class InstancesController {
     assertValidInstanceId(instanceId);
     await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
     return this.antibanReadonly.getUsage(instanceId);
+  }
+
+  // Apaga a sessão (WhatsApp invalidou, chip trocou de dono, etc) - depois
+  // disso a instância volta a precisar de QR novo pra parear. Mantém a
+  // "posse" (instance_owners) intacta - reconectar com o mesmo instanceId
+  // continua sendo desse mesmo usuário.
+  @Delete(':instanceId')
+  async reset(@Param('instanceId') instanceId: string, @Req() req: any) {
+    assertValidInstanceId(instanceId);
+    await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
+    return this.engineClient.resetInstance(instanceId);
   }
 }
