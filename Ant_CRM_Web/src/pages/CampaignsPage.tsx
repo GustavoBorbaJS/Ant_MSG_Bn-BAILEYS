@@ -209,7 +209,7 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
 
   const { data: contactsPage } = useQuery({
     queryKey: ['contacts', ''],
-    queryFn: async () => (await api.get<Paginated<Contact>>('/contacts', { params: { pageSize: 500 } })).data,
+    queryFn: async () => (await api.get<Paginated<Contact>>('/contacts', { params: { pageSize: 5000 } })).data,
   });
 
   const dispatchMutation = useMutation({
@@ -240,6 +240,16 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
       else next.add(id);
       return next;
     });
+  }
+
+  const allContactsSelected = !!contactsPage?.items.length && contactsPage.items.every((c) => selectedIds.has(c.id));
+
+  function toggleAll() {
+    if (allContactsSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(contactsPage?.items.map((c) => c.id) ?? []));
+    }
   }
 
   const connectedInstances = instances?.filter((i) => i.status === 'connected') ?? [];
@@ -274,9 +284,17 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         ))}
       </select>
 
-      <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
-        Contatos ({selectedIds.size} selecionado{selectedIds.size === 1 ? '' : 's'})
-      </label>
+      <div className="mb-1 flex items-center justify-between">
+        <label className="block text-sm text-gray-600 dark:text-gray-400">
+          Contatos ({selectedIds.size} selecionado{selectedIds.size === 1 ? '' : 's'})
+        </label>
+        {!!contactsPage?.items.length && (
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+            <input type="checkbox" checked={allContactsSelected} onChange={toggleAll} />
+            Selecionar todos
+          </label>
+        )}
+      </div>
       <div className="mb-4 max-h-48 overflow-y-auto rounded-md border border-gray-300 dark:border-gray-700">
         {contactsPage?.items.map((contact) => (
           <label

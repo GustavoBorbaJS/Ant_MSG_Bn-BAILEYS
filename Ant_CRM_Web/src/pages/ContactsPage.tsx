@@ -1,14 +1,16 @@
-import { useState } from 'react';
-import type { FormEvent } from 'react';
+import { useRef, useState } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { Contact, Paginated } from '../lib/api';
+import type { Contact, ImportContactsResult, Paginated } from '../lib/api';
 import { Modal } from '../components/Modal';
 
 export function ContactsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Contact | 'new' | null>(null);
+  const [importResult, setImportResult] = useState<ImportContactsResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['contacts', search],
@@ -20,10 +22,41 @@ export function ContactsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['contacts'] }),
   });
 
+  const importMutation = useMutation({
+    mutationFn: (phones: string[]) => api.post<ImportContactsResult>('/contacts/import', { phones }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      setImportResult(res.data);
+    },
+    onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível importar o arquivo.'),
+  });
+
   function handleDelete(contact: Contact) {
     if (confirm(`Remover o contato "${contact.name}"?`)) {
       deleteMutation.mutate(contact.id);
     }
+  }
+
+  function handleImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? '');
+      const phones = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (phones.length === 0) {
+        alert('O arquivo está vazio.');
+        return;
+      }
+      importMutation.mutate(phones);
+    };
+    reader.onerror = () => alert('Não foi possível ler o arquivo.');
+    reader.readAsText(file);
   }
 
   return (
@@ -37,6 +70,20 @@ export function ContactsPage() {
             placeholder="Buscar por nome ou telefone..."
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".txt,text/plain"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importMutation.isPending}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
+          >
+            {importMutation.isPending ? 'Importando...' : 'Importar .txt'}
+          </button>
           <button
             onClick={() => setEditing('new')}
             className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900"
@@ -45,6 +92,23 @@ export function ContactsPage() {
           </button>
         </div>
       </div>
+
+      {importResult && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-300">
+          <span>
+            Importação: {importResult.imported} novo{importResult.imported === 1 ? '' : 's'},{' '}
+            {importResult.duplicates} já cadastrado{importResult.duplicates === 1 ? '' : 's'},{' '}
+            {importResult.invalid} inválido{importResult.invalid === 1 ? '' : 's'} (de {importResult.received} linha
+            {importResult.received === 1 ? '' : 's'}).
+          </span>
+          <button
+            onClick={() => setImportResult(null)}
+            className="ml-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {isLoading && <p className="text-sm text-gray-500 dark:text-gray-400">Carregando...</p>}
 

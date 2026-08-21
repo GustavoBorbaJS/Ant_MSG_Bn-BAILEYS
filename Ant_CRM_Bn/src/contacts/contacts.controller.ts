@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ContactsService } from './contacts.service';
-import { CreateContactDto, UpdateContactDto } from './dto';
+import { CreateContactDto, ImportContactsDto, UpdateContactDto } from './dto';
 
 @Controller('contacts')
 export class ContactsController {
@@ -24,6 +24,11 @@ export class ContactsController {
   @Post()
   create(@Body() dto: CreateContactDto) {
     return this.contactsService.create(dto);
+  }
+
+  @Post('import')
+  import(@Body() dto: ImportContactsDto) {
+    return this.contactsService.importPhones(dto.phones);
   }
 
   @Patch(':id')

@@ -1,4 +1,4 @@
-import { IsArray, IsOptional, IsString, Length } from 'class-validator';
+import { ArrayMinSize, IsArray, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateContactDto {
   @IsString()
@@ -40,4 +40,13 @@ export class UpdateContactDto {
   @IsString()
   @Length(0, 2000)
   notes?: string;
+}
+
+export class ImportContactsDto {
+  // uma linha por telefone, cru (com ou sem formatação/DDI) - normalização
+  // e DDI 55 ficam por conta do ContactsService.importPhones
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  phones: string[];
 }

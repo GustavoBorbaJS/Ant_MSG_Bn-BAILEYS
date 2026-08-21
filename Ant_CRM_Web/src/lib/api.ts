@@ -60,6 +60,13 @@ export interface Contact {
   updatedAt: string;
 }
 
+export interface ImportContactsResult {
+  received: number;
+  imported: number;
+  duplicates: number;
+  invalid: number;
+}
+
 export interface Paginated<T> {
   items: T[];
   total: number;
