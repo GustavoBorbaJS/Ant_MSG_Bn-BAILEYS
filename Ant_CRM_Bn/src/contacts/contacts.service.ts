@@ -30,8 +30,8 @@ export class ContactsService {
     private readonly contactRepo: Repository<Contact>,
   ) {}
 
-  async list(search?: string, tag?: string, page = 1, pageSize = 50) {
-    const qb = this.contactRepo.createQueryBuilder('contact');
+  async list(ownerId: string, search?: string, tag?: string, page = 1, pageSize = 50) {
+    const qb = this.contactRepo.createQueryBuilder('contact').where('contact.ownerId = :ownerId', { ownerId });
 
     if (search) {
       qb.andWhere('(contact.name ILIKE :search OR contact.phone ILIKE :search)', { search: `%${search}%` });
@@ -48,23 +48,24 @@ export class ContactsService {
     return { items, total, page, pageSize };
   }
 
-  async findOne(id: string): Promise<Contact> {
-    const contact = await this.contactRepo.findOne({ where: { id } });
+  async findOne(id: string, ownerId: string): Promise<Contact> {
+    const contact = await this.contactRepo.findOne({ where: { id, ownerId } });
     if (!contact) {
       throw new NotFoundException('Contato não encontrado');
     }
     return contact;
   }
 
-  create(dto: CreateContactDto): Promise<Contact> {
-    return this.contactRepo.save(this.contactRepo.create({ ...dto, tags: dto.tags || [] }));
+  create(dto: CreateContactDto, ownerId: string): Promise<Contact> {
+    return this.contactRepo.save(this.contactRepo.create({ ...dto, tags: dto.tags || [], ownerId }));
   }
 
   // Importação em lote (ex: .txt com um telefone por linha). Normaliza (DDI
   // 55) e dedupa dentro do próprio arquivo, depois insere ignorando
-  // conflitos com contatos já cadastrados (telefone é unique) - não falha
-  // o lote inteiro por causa de duplicados, só reporta quantos ficaram de fora.
-  async importPhones(rawPhones: string[]): Promise<ImportContactsResult> {
+  // conflitos com contatos que esse mesmo dono já tem (telefone é unique por
+  // dono) - não falha o lote inteiro por causa de duplicados, só reporta
+  // quantos ficaram de fora.
+  async importPhones(rawPhones: string[], ownerId: string): Promise<ImportContactsResult> {
     const received = rawPhones.length;
     let invalid = 0;
     const normalized = new Set<string>();
@@ -87,7 +88,7 @@ export class ContactsService {
       .createQueryBuilder()
       .insert()
       .into(Contact)
-      .values(uniquePhones.map((phone) => ({ name: phone, phone, tags: [] })))
+      .values(uniquePhones.map((phone) => ({ name: phone, phone, tags: [], ownerId })))
       .orIgnore()
       .returning(['id'])
       .execute();
@@ -98,14 +99,14 @@ export class ContactsService {
     return { received, imported, duplicates, invalid };
   }
 
-  async update(id: string, dto: UpdateContactDto): Promise<Contact> {
-    const contact = await this.findOne(id);
+  async update(id: string, dto: UpdateContactDto, ownerId: string): Promise<Contact> {
+    const contact = await this.findOne(id, ownerId);
     Object.assign(contact, dto);
     return this.contactRepo.save(contact);
   }
 
-  async remove(id: string): Promise<void> {
-    const result = await this.contactRepo.delete(id);
+  async remove(id: string, ownerId: string): Promise<void> {
+    const result = await this.contactRepo.delete({ id, ownerId });
     if (!result.affected) {
       throw new NotFoundException('Contato não encontrado');
     }

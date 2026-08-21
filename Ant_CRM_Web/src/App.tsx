@@ -10,6 +10,7 @@ import { UsersPage } from './pages/UsersPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MessageLogsPage } from './pages/MessageLogsPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { ActivityPage } from './pages/ActivityPage';
 
 export function App() {
   return (
@@ -28,6 +29,7 @@ export function App() {
           <Route element={<AdminRoute />}>
             <Route path="/users" element={<UsersPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
           </Route>
         </Route>
       </Route>

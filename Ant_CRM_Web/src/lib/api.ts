@@ -119,6 +119,7 @@ export interface MessageLog {
   campaign: { id: string; name: string } | null;
   contact: { id: string; name: string; phone: string } | null;
   dispatchMode: DispatchMode;
+  dispatcher?: { id: string; name: string; username: string } | null;
 }
 
 export interface TrafficPoint {

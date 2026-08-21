@@ -7,37 +7,37 @@ export class CampaignsController {
   constructor(private readonly campaignsService: CampaignsService) {}
 
   @Get()
-  list() {
-    return this.campaignsService.list();
+  list(@Req() req: any) {
+    return this.campaignsService.list(req.user.sub);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.campaignsService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req: any) {
+    return this.campaignsService.findOne(id, req.user.sub);
   }
 
   @Post()
-  create(@Body() dto: CreateCampaignDto) {
-    return this.campaignsService.create(dto);
+  create(@Body() dto: CreateCampaignDto, @Req() req: any) {
+    return this.campaignsService.create(dto, req.user.sub);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateCampaignDto) {
-    return this.campaignsService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateCampaignDto, @Req() req: any) {
+    return this.campaignsService.update(id, dto, req.user.sub);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.campaignsService.remove(id);
+  remove(@Param('id') id: string, @Req() req: any) {
+    return this.campaignsService.remove(id, req.user.sub);
   }
 
   @Get(':id/progress')
-  progress(@Param('id') id: string) {
-    return this.campaignsService.progress(id);
+  progress(@Param('id') id: string, @Req() req: any) {
+    return this.campaignsService.progress(id, req.user.sub);
   }
 
   @Post(':id/dispatch')
   dispatch(@Param('id') id: string, @Body() dto: DispatchCampaignDto, @Req() req: any) {
-    return this.campaignsService.dispatch(id, dto, req.user.sub);
+    return this.campaignsService.dispatch(id, dto, { id: req.user.sub, role: req.user.role });
   }
 }

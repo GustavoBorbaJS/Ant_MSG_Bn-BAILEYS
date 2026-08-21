@@ -23,7 +23,12 @@ export function Layout() {
 
   const items =
     me?.role === 'admin'
-      ? [...navItems, { to: '/users', label: 'Usuários' }, { to: '/settings', label: 'Configurações' }]
+      ? [
+          ...navItems,
+          { to: '/activity', label: 'Atividade' },
+          { to: '/users', label: 'Usuários' },
+          { to: '/settings', label: 'Configurações' },
+        ]
       : navItems;
 
   return (

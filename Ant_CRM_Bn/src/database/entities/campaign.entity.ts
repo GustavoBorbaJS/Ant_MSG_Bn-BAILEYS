@@ -15,6 +15,9 @@ export class Campaign {
   @Column({ nullable: true })
   lastDispatchedAt: Date;
 
+  @Column()
+  ownerId: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

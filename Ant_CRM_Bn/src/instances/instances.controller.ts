@@ -1,6 +1,7 @@
-import { BadRequestException, Controller, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import { EngineClientService } from './engine-client.service';
 import { AntibanReadonlyService } from '../antiban-readonly/antiban-readonly.service';
+import { InstanceOwnersService } from '../instance-owners/instance-owners.service';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -15,46 +16,66 @@ export class InstancesController {
   constructor(
     private readonly engineClient: EngineClientService,
     private readonly antibanReadonly: AntibanReadonlyService,
+    private readonly instanceOwners: InstanceOwnersService,
   ) {}
 
   @Get()
-  async list() {
+  async list(@Req() req: any) {
+    const requester = { id: req.user.sub, role: req.user.role };
     const instances = await this.engineClient.listInstances();
+    const ownedIds = await this.instanceOwners.listOwnedInstanceIds(
+      requester,
+      instances.map((i) => i.instanceId),
+    );
+    const ownedSet = new Set(ownedIds);
+
     return Promise.all(
-      instances.map(async (instance) => {
-        const { level, ageDays } = await this.antibanReadonly.getWarmupLevel(instance.instanceId);
-        return { ...instance, warmupLevel: level, warmupAgeDays: ageDays };
-      }),
+      instances
+        .filter((instance) => ownedSet.has(instance.instanceId))
+        .map(async (instance) => {
+          const { level, ageDays } = await this.antibanReadonly.getWarmupLevel(instance.instanceId);
+          return { ...instance, warmupLevel: level, warmupAgeDays: ageDays };
+        }),
     );
   }
 
   @Post(':instanceId/connect')
-  connect(@Param('instanceId') instanceId: string) {
+  async connect(@Param('instanceId') instanceId: string, @Req() req: any) {
     assertValidInstanceId(instanceId);
+    const requester = { id: req.user.sub, role: req.user.role };
+
+    const existingInstances = await this.engineClient.listInstances();
+    const instanceExistsInEngine = existingInstances.some((i) => i.instanceId === instanceId);
+    await this.instanceOwners.resolveOwnerOnConnect(instanceId, requester, instanceExistsInEngine);
+
     return this.engineClient.connect(instanceId);
   }
 
   @Get(':instanceId/status')
-  status(@Param('instanceId') instanceId: string) {
+  async status(@Param('instanceId') instanceId: string, @Req() req: any) {
     assertValidInstanceId(instanceId);
+    await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
     return this.engineClient.getStatus(instanceId);
   }
 
   @Post(':instanceId/reconnect')
-  reconnect(@Param('instanceId') instanceId: string) {
+  async reconnect(@Param('instanceId') instanceId: string, @Req() req: any) {
     assertValidInstanceId(instanceId);
+    await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
     return this.engineClient.reconnect(instanceId);
   }
 
   @Get(':instanceId/check/:to')
-  check(@Param('instanceId') instanceId: string, @Param('to') to: string) {
+  async check(@Param('instanceId') instanceId: string, @Param('to') to: string, @Req() req: any) {
     assertValidInstanceId(instanceId);
+    await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
     return this.engineClient.checkNumber(instanceId, to);
   }
 
   @Get(':instanceId/usage')
-  usage(@Param('instanceId') instanceId: string) {
+  async usage(@Param('instanceId') instanceId: string, @Req() req: any) {
     assertValidInstanceId(instanceId);
+    await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
     return this.antibanReadonly.getUsage(instanceId);
   }
 }

@@ -5,6 +5,7 @@ import { MessageLog } from '../database/entities/message-log.entity';
 import { QueueProducerService } from '../queue/queue-producer.service';
 import { EngineClientService } from '../instances/engine-client.service';
 import { AntibanReadonlyService } from '../antiban-readonly/antiban-readonly.service';
+import { InstanceOwnersService, RequesterInfo } from '../instance-owners/instance-owners.service';
 
 const WAIT_BUCKETS = [
   { label: '<5s', max: 5 },
@@ -23,9 +24,10 @@ export class AnalyticsService {
     private readonly queueProducer: QueueProducerService,
     private readonly engineClient: EngineClientService,
     private readonly antibanReadonly: AntibanReadonlyService,
+    private readonly instanceOwners: InstanceOwnersService,
   ) {}
 
-  async getTraffic(instanceId: string | undefined, hours: number) {
+  async getTraffic(ownerId: string, instanceId: string | undefined, hours: number) {
     const since = new Date(Date.now() - hours * 3_600_000);
 
     const qb = this.messageLogRepo
@@ -34,6 +36,7 @@ export class AnalyticsService {
       .addSelect('m.status', 'status')
       .addSelect('COUNT(*)', 'count')
       .where('m.createdAt >= :since', { since })
+      .andWhere('m.dispatchedBy = :ownerId', { ownerId })
       .groupBy('hour')
       .addGroupBy('m.status')
       .orderBy('hour', 'ASC');
@@ -57,7 +60,7 @@ export class AnalyticsService {
     return this.queueProducer.getJobCounts();
   }
 
-  async getWaitTime(instanceId: string | undefined, hours: number) {
+  async getWaitTime(ownerId: string, instanceId: string | undefined, hours: number) {
     const since = new Date(Date.now() - hours * 3_600_000);
 
     const qb = this.messageLogRepo
@@ -65,7 +68,8 @@ export class AnalyticsService {
       .select('EXTRACT(EPOCH FROM (m.sentAt - m.createdAt))', 'waitSeconds')
       .where('m.status = :status', { status: 'sent' })
       .andWhere('m.sentAt IS NOT NULL')
-      .andWhere('m.createdAt >= :since', { since });
+      .andWhere('m.createdAt >= :since', { since })
+      .andWhere('m.dispatchedBy = :ownerId', { ownerId });
 
     if (instanceId) qb.andWhere('m.instanceId = :instanceId', { instanceId });
 
@@ -81,13 +85,22 @@ export class AnalyticsService {
     return histogram;
   }
 
-  async getWarmupOverview() {
+  async getWarmupOverview(requester: RequesterInfo) {
     const instances = await this.engineClient.listInstances();
+    const ownedIds = new Set(
+      await this.instanceOwners.listOwnedInstanceIds(
+        requester,
+        instances.map((i) => i.instanceId),
+      ),
+    );
+
     return Promise.all(
-      instances.map(async (instance) => {
-        const usage = await this.antibanReadonly.getUsage(instance.instanceId);
-        return { instanceId: instance.instanceId, status: instance.status, ...usage };
-      }),
+      instances
+        .filter((instance) => ownedIds.has(instance.instanceId))
+        .map(async (instance) => {
+          const usage = await this.antibanReadonly.getUsage(instance.instanceId);
+          return { instanceId: instance.instanceId, status: instance.status, ...usage };
+        }),
     );
   }
 }

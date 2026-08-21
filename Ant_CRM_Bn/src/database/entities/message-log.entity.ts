@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { Campaign } from './campaign.entity';
 import { Contact } from './contact.entity';
+import { User } from './user.entity';
 
 // Mesma tabela que Ant_MSG_Bn/src/database/entities/message-log.entity.ts mapeia.
 // O worker so toca id/status/sentAt/failedAt/errorMessage/updatedAt - campaignId e
@@ -62,6 +63,12 @@ export class MessageLog {
 
   @Column({ nullable: true })
   dispatchedBy: string;
+
+  // sem FK no banco (evita mais uma migration) - so pra dar join na aba de
+  // atividade admin (message-logs/activity) e mostrar quem disparou
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'dispatchedBy' })
+  dispatcher: User;
 
   @CreateDateColumn()
   createdAt: Date;
