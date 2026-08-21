@@ -215,17 +215,14 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
   const dispatchMutation = useMutation({
     mutationFn: () => {
       const contactIds = Array.from(selectedIds);
-      if (mode === 'auto') {
-        return api.post(`/campaigns/${campaign.id}/dispatch`, { instanceId, contactIds, mode: 'auto' });
-      }
-      const batchSizes = parseBatchSizes(batchSizesInput);
+      const batchSizes = mode === 'direct' ? parseBatchSizes(batchSizesInput) : [];
       return api.post(`/campaigns/${campaign.id}/dispatch`, {
         instanceId,
         contactIds,
-        mode: 'direct',
-        acknowledgeRisk: true,
-        batchSizes: batchSizes.length > 0 ? batchSizes : undefined,
-        batchIntervalMinutes: batchSizes.length > 1 ? Number(batchIntervalMinutes) : undefined,
+        mode,
+        acknowledgeRisk: mode === 'direct' ? true : undefined,
+        batchSizes: mode === 'direct' && batchSizes.length > 0 ? batchSizes : undefined,
+        batchIntervalMinutes: mode === 'direct' && batchSizes.length > 1 ? Number(batchIntervalMinutes) : undefined,
       });
     },
     onSuccess: (res) => {
