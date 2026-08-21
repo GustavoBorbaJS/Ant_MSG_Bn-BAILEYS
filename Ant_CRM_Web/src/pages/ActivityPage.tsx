@@ -129,8 +129,8 @@ export function ActivityPage() {
 
       {isLoading && <p className="text-sm text-gray-500 dark:text-gray-400">Carregando...</p>}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
             <tr>
               <th className="px-4 py-2">Data</th>

@@ -29,11 +29,11 @@ export function CampaignsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Campanhas</h1>
         <button
           onClick={() => setEditing('new')}
-          className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900"
+          className="self-start rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900 sm:self-auto"
         >
           Nova campanha
         </button>
@@ -52,12 +52,10 @@ export function CampaignsPage() {
               key={campaign.id}
               className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
             >
-              <div className="mb-2 flex items-start justify-between">
-                <div>
+              <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
                   <h3 className="font-medium text-gray-900 dark:text-gray-100">{campaign.name}</h3>
-                  <p className="mt-0.5 max-w-xl truncate text-sm text-gray-500 dark:text-gray-400">
-                    {campaign.text}
-                  </p>
+                  <p className="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-400">{campaign.text}</p>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <button

@@ -81,8 +81,8 @@ export function SettingsPage() {
       </p>
 
       <form onSubmit={handleSubmit}>
-        <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-          <table className="w-full text-sm">
+        <div className="mb-6 overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <table className="w-full min-w-[520px] text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
               <tr>
                 <th className="px-4 py-2">Nível de aquecimento</th>
@@ -116,7 +116,7 @@ export function SettingsPage() {
           </table>
         </div>
 
-        <div className="mb-6 grid grid-cols-2 gap-4">
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
               Dias até virar "morno"

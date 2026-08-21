@@ -56,11 +56,11 @@ export function UsersPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Usuários</h1>
         <button
           onClick={() => setCreating(true)}
-          className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900"
+          className="self-start rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900 sm:self-auto"
         >
           Novo usuário
         </button>
@@ -68,8 +68,8 @@ export function UsersPage() {
 
       {isLoading && <p className="text-sm text-gray-500 dark:text-gray-400">Carregando...</p>}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
             <tr>
               <th className="px-4 py-2">Nome</th>

@@ -51,14 +51,14 @@ export function InstancesPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Instâncias</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             value={newInstanceId}
             onChange={(e) => setNewInstanceId(e.target.value)}
             placeholder="ex: 5511999999999"
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:flex-none"
           />
           <button
             disabled={!newInstanceId}
@@ -72,8 +72,8 @@ export function InstancesPage() {
 
       {isLoading && <p className="text-sm text-gray-500 dark:text-gray-400">Carregando...</p>}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <table className="w-full min-w-[560px] text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
             <tr>
               <th className="px-4 py-2">Instância</th>
@@ -155,8 +155,8 @@ function PairingDialog({ instanceId, onClose }: { instanceId: string; onClose: (
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/40">
-      <div className="w-80 rounded-lg bg-white p-6 text-center shadow-lg dark:bg-gray-900">
+    <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-80 rounded-lg bg-white p-6 text-center shadow-lg dark:bg-gray-900">
         <h2 className="mb-1 font-semibold text-gray-900 dark:text-gray-100">{instanceId}</h2>
         <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
           {status?.status === 'connected' ? 'Conectado!' : 'Escaneie com WhatsApp → Aparelhos conectados'}
