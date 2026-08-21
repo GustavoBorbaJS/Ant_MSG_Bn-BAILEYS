@@ -24,8 +24,24 @@ export class UsersService implements OnModuleInit {
   // Bootstrap: se ainda nao existe nenhum usuario no banco, cria o admin inicial
   // a partir do que ja estava configurado via env (CRM_ADMIN_USERNAME/HASH) -
   // preserva o login que ja existia antes de mover pra usuarios de verdade no banco.
+  //
+  // Roda antes das migrations em alguns cenarios de deploy (container sobe
+  // antes de alguem rodar "migration:run:prod" manualmente) - sem o catch
+  // abaixo, "relation users does not exist" derrubava a API inteira num loop
+  // de crash, impedindo ate de abrir um terminal no container pra rodar as
+  // migrations. Melhor logar e deixar a API de pe (com login quebrado) do que
+  // crashar - depois de rodar as migrations, um restart do container completa
+  // o bootstrap normalmente.
   async onModuleInit() {
-    const count = await this.userRepo.count();
+    let count: number;
+    try {
+      count = await this.userRepo.count();
+    } catch (err) {
+      this.logger.error(
+        `Não foi possível consultar a tabela "users" (rode as migrations: npm run migration:run:prod) - login vai falhar até lá: ${err.message}`,
+      );
+      return;
+    }
     if (count > 0) return;
 
     const { adminUsername, adminPasswordHash } = this.configService.get('auth');
