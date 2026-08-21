@@ -10,6 +10,9 @@ interface MessageJobData {
   // true = disparo em modo direto, pula o checkRateLimit no worker
   // (Ant_MSG_Bn/src/queue/queue.consumer.ts) - ver CampaignsService.dispatch
   skipRateLimit?: boolean;
+  // URL da imagem da campanha (servida por essa própria API) - ver
+  // CampaignsService.dispatch/getImagePath
+  imageUrl?: string;
 }
 
 // Produtor pra fila 'messages' que o worker (Ant_MSG_Bn/src/queue/queue.consumer.ts)

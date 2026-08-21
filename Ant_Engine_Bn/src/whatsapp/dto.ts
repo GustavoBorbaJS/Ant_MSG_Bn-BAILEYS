@@ -1,4 +1,4 @@
-import { IsString, Length, Matches } from 'class-validator';
+import { IsOptional, IsString, IsUrl, Length, Matches } from 'class-validator';
 
 // instanceId vira nome de pasta em disco (sessao) e chave de rate limit no worker -
 // trava o formato pra evitar path traversal e afins.
@@ -17,6 +17,12 @@ export class SendDto {
   @IsString()
   @Length(1, 4096)
   text: string;
+
+  // URL interna (ex: http://crm-api:3002/campaigns/:id/image) - require_tld:false
+  // pra aceitar hostname de container docker (sem ponto/TLD)
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  imageUrl?: string;
 }
 
 export class InstanceIdDto {

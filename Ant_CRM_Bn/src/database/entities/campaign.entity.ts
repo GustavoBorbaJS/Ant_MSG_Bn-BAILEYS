@@ -15,6 +15,11 @@ export class Campaign {
   @Column({ nullable: true })
   lastDispatchedAt: Date;
 
+  // nome do arquivo em disco (uploads/), nao o path completo - ver
+  // CampaignsService.setImage. Texto vira legenda quando tem imagem.
+  @Column({ nullable: true })
+  imageFilename: string;
+
   @Column()
   ownerId: string;
 

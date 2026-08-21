@@ -138,14 +138,17 @@ export class WhatsappService implements OnModuleDestroy {
     return this.connectInstance(instanceId);
   }
 
-  async sendMessage(instanceId: string, to: string, text: string): Promise<{ messageId: string }> {
+  async sendMessage(instanceId: string, to: string, text: string, imageUrl?: string): Promise<{ messageId: string }> {
     const instance = this.instances.get(instanceId);
     if (!instance || instance.status !== 'connected') {
       throw new Error(`Instance ${instanceId} is not connected`);
     }
 
     const jid = await this.resolveJid(instance, to);
-    const result = await instance.sock.sendMessage(jid, { text });
+    // Baileys baixa a URL sozinho (não precisamos buscar os bytes aqui) - texto
+    // da campanha vira legenda quando tem imagem
+    const content = imageUrl ? { image: { url: imageUrl }, caption: text } : { text };
+    const result = await instance.sock.sendMessage(jid, content);
 
     return { messageId: result?.key?.id };
   }

@@ -14,6 +14,9 @@ interface MessageJobData {
   // true = job originado de um disparo em modo direto no CRM (usuario
   // confirmou ciencia do risco) - pula o checkRateLimit abaixo de proposito.
   skipRateLimit?: boolean;
+  // URL da imagem da campanha (servida pelo proprio crm-api) - o engine baixa
+  // sozinho, o worker so repassa a URL adiante
+  imageUrl?: string;
 }
 
 @Injectable()
@@ -41,7 +44,7 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
   }
 
   async process(job: Job<MessageJobData>, token?: string): Promise<any> {
-    const { messageLogId, instanceId, to, text, skipRateLimit } = job.data;
+    const { messageLogId, instanceId, to, text, skipRateLimit, imageUrl } = job.data;
 
     this.logger.debug(`Processing job ${job.id} for message ${messageLogId}`);
 
@@ -102,7 +105,7 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
 
       // 2. CHAMA A ENGINE
       this.logger.debug(`Calling engine sendRaw for ${messageLogId}`);
-      const result = await this.engineService.sendRaw(instanceId, to, text);
+      const result = await this.engineService.sendRaw(instanceId, to, text, imageUrl);
 
       // 3. ATUALIZA COMO SUCESSO
       await this.messageLogService.updateStatus(messageLogId, 'sent', {

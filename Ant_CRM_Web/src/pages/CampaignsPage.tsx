@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, campaignImageUrl } from '../lib/api';
 import type { Campaign, Contact, InstanceSummary, Paginated } from '../lib/api';
 import { Modal } from '../components/Modal';
 
@@ -53,9 +53,18 @@ export function CampaignsPage() {
               className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
             >
               <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-medium text-gray-900 dark:text-gray-100">{campaign.name}</h3>
-                  <p className="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-400">{campaign.text}</p>
+                <div className="flex min-w-0 gap-3">
+                  {campaign.imageFilename && (
+                    <img
+                      src={campaignImageUrl(campaign.id)}
+                      alt=""
+                      className="h-12 w-12 shrink-0 rounded-md object-cover"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="font-medium text-gray-900 dark:text-gray-100">{campaign.name}</h3>
+                    <p className="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-400">{campaign.text}</p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <button
@@ -115,10 +124,25 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
   const [name, setName] = useState(campaign?.name ?? '');
   const [text, setText] = useState(campaign?.text ?? '');
   const [error, setError] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      campaign ? api.patch(`/campaigns/${campaign.id}`, { name, text }) : api.post('/campaigns', { name, text }),
+    mutationFn: async () => {
+      const res = campaign
+        ? await api.patch<Campaign>(`/campaigns/${campaign.id}`, { name, text })
+        : await api.post<Campaign>('/campaigns', { name, text });
+      const campaignId = res.data.id;
+
+      if (imageFile) {
+        const formData = new FormData();
+        formData.append('image', imageFile);
+        await api.post(`/campaigns/${campaignId}/image`, formData);
+      } else if (removeCurrentImage && campaign?.imageFilename) {
+        await api.delete(`/campaigns/${campaignId}/image`);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
       onClose();
@@ -126,11 +150,28 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
     onError: () => setError('Não foi possível salvar.'),
   });
 
+  function handleImageChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setImageFile(file);
+    setRemoveCurrentImage(false);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(file ? URL.createObjectURL(file) : null);
+  }
+
+  function handleRemoveImage() {
+    setImageFile(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    setRemoveCurrentImage(true);
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     saveMutation.mutate();
   }
+
+  const showCurrentImage = campaign?.imageFilename && !removeCurrentImage && !imagePreview;
 
   return (
     <Modal onClose={onClose}>
@@ -147,13 +188,39 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
           className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         />
 
-        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Mensagem</label>
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+          Mensagem {(imagePreview || showCurrentImage) && '(legenda da imagem)'}
+        </label>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           required
           rows={4}
-          className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+        />
+
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Imagem (opcional)</label>
+        {(imagePreview || showCurrentImage) && (
+          <div className="mb-2 flex items-center gap-3">
+            <img
+              src={imagePreview ?? campaignImageUrl(campaign!.id)}
+              alt=""
+              className="h-16 w-16 rounded-md object-cover"
+            />
+            <button
+              type="button"
+              onClick={handleRemoveImage}
+              className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+            >
+              Remover imagem
+            </button>
+          </div>
+        )}
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={handleImageChange}
+          className="mb-4 w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 dark:text-gray-400 dark:file:bg-gray-800 dark:file:text-gray-300"
         />
 
         {error && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</p>}

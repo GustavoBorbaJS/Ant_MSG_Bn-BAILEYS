@@ -29,9 +29,9 @@ export class WhatsappController {
   async send(@Body() body: SendDto) {
     try {
       if (this.metaCloudService.hasInstance(body.instanceId)) {
-        return await this.metaCloudService.sendMessage(body.instanceId, body.to, body.text);
+        return await this.metaCloudService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl);
       }
-      return await this.whatsappService.sendMessage(body.instanceId, body.to, body.text);
+      return await this.whatsappService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl);
     } catch (err) {
       throw new HttpException(err.message, HttpStatus.SERVICE_UNAVAILABLE);
     }

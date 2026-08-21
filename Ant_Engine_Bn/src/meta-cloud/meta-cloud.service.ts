@@ -37,7 +37,7 @@ export class MetaCloudService {
     return this.instances.has(instanceId);
   }
 
-  async sendMessage(instanceId: string, to: string, text: string): Promise<{ messageId: string }> {
+  async sendMessage(instanceId: string, to: string, text: string, imageUrl?: string): Promise<{ messageId: string }> {
     const config = this.instances.get(instanceId);
     if (!config) {
       throw new Error(`Instance ${instanceId} não está registrada como instância Meta Cloud API`);
@@ -45,15 +45,16 @@ export class MetaCloudService {
 
     const url = `https://graph.facebook.com/${this.apiVersion}/${config.phoneNumberId}/messages`;
 
+    // A Meta Cloud API tambem so precisa da URL - ela baixa a imagem sozinha
+    // (precisa ser publicamente acessivel, nao so na rede interna do docker)
+    const payload = imageUrl
+      ? { messaging_product: 'whatsapp', to: this.toE164(to), type: 'image', image: { link: imageUrl, caption: text } }
+      : { messaging_product: 'whatsapp', to: this.toE164(to), type: 'text', text: { body: text } };
+
     try {
       const response = await axios.post(
         url,
-        {
-          messaging_product: 'whatsapp',
-          to: this.toE164(to),
-          type: 'text',
-          text: { body: text },
-        },
+        payload,
         {
           headers: {
             Authorization: `Bearer ${config.accessToken}`,

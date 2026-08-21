@@ -20,7 +20,7 @@ export class EngineService {
     });
   }
 
-  async sendRaw(instanceId: string, to: string, text: string): Promise<any> {
+  async sendRaw(instanceId: string, to: string, text: string, imageUrl?: string): Promise<any> {
     this.logger.debug(`Sending message from instance ${instanceId} to ${to}`);
 
     try {
@@ -28,6 +28,7 @@ export class EngineService {
         instanceId,
         to,
         text,
+        imageUrl,
       });
 
       if (response.status !== 200) {

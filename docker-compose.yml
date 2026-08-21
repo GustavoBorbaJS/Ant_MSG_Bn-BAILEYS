@@ -76,6 +76,9 @@ services:
       CRM_ADMIN_PASSWORD_HASH: ${CRM_ADMIN_PASSWORD_HASH}
       CRM_JWT_SECRET: ${CRM_JWT_SECRET}
       CRM_JWT_EXPIRES_IN: ${CRM_JWT_EXPIRES_IN:-24h}
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - antiban_crm_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,3 +135,4 @@ volumes:
   antiban_postgres_data:
   antiban_redis_data:
   antiban_engine_sessions:
+  antiban_crm_uploads:

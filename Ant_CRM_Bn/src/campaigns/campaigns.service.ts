@@ -1,6 +1,10 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as crypto from 'crypto';
 import { Campaign } from '../database/entities/campaign.entity';
 import { Contact } from '../database/entities/contact.entity';
 import { MessageLog } from '../database/entities/message-log.entity';
@@ -9,6 +13,13 @@ import { InstanceOwnersService, RequesterInfo } from '../instance-owners/instanc
 import { CreateCampaignDto, DispatchCampaignDto, DispatchMode, UpdateCampaignDto } from './dto';
 
 type Progress = { pending: number; sent: number; failed: number };
+
+const ALLOWED_IMAGE_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
 
 @Injectable()
 export class CampaignsService {
@@ -20,7 +31,12 @@ export class CampaignsService {
     @InjectRepository(MessageLog) private readonly messageLogRepo: Repository<MessageLog>,
     private readonly queueProducer: QueueProducerService,
     private readonly instanceOwners: InstanceOwnersService,
+    private readonly configService: ConfigService,
   ) {}
+
+  private uploadsDir(): string {
+    return this.configService.get<string>('uploadsDir');
+  }
 
   async list(ownerId: string) {
     const campaigns = await this.campaignRepo.find({ where: { ownerId }, order: { createdAt: 'DESC' } });
@@ -65,9 +81,67 @@ export class CampaignsService {
   }
 
   async remove(id: string, ownerId: string): Promise<void> {
-    const result = await this.campaignRepo.delete({ id, ownerId });
-    if (!result.affected) {
-      throw new NotFoundException('Campanha não encontrada');
+    const campaign = await this.findOne(id, ownerId);
+    await this.campaignRepo.delete({ id, ownerId });
+    if (campaign.imageFilename) {
+      await this.deleteImageFile(campaign.imageFilename);
+    }
+  }
+
+  async setImage(id: string, ownerId: string, file: Express.Multer.File): Promise<Campaign> {
+    const campaign = await this.findOne(id, ownerId);
+
+    const ext = ALLOWED_IMAGE_EXT[file.mimetype];
+    if (!ext) {
+      throw new BadRequestException('Formato de imagem não suportado (use JPEG, PNG, WEBP ou GIF).');
+    }
+
+    const oldFilename = campaign.imageFilename;
+    const filename = `${campaign.id}-${crypto.randomBytes(6).toString('hex')}${ext}`;
+
+    await fs.mkdir(this.uploadsDir(), { recursive: true });
+    await fs.writeFile(path.join(this.uploadsDir(), filename), file.buffer);
+
+    campaign.imageFilename = filename;
+    const saved = await this.campaignRepo.save(campaign);
+
+    if (oldFilename) {
+      await this.deleteImageFile(oldFilename);
+    }
+
+    return saved;
+  }
+
+  async removeImage(id: string, ownerId: string): Promise<Campaign> {
+    const campaign = await this.findOne(id, ownerId);
+    if (campaign.imageFilename) {
+      await this.deleteImageFile(campaign.imageFilename);
+      campaign.imageFilename = null;
+      await this.campaignRepo.save(campaign);
+    }
+    return campaign;
+  }
+
+  // Sem checagem de dono de propósito - essa URL é chamada pelo Engine (rede
+  // interna do docker, sem token de usuário) na hora de repassar a imagem pro
+  // WhatsApp. O nome do arquivo (uuid + hex aleatório) já não é adivinhável.
+  async getImagePath(id: string): Promise<{ path: string; mimetype: string } | null> {
+    const campaign = await this.campaignRepo.findOne({ where: { id } });
+    if (!campaign?.imageFilename) return null;
+
+    const ext = path.extname(campaign.imageFilename);
+    const mimetype = Object.entries(ALLOWED_IMAGE_EXT).find(([, e]) => e === ext)?.[0] || 'application/octet-stream';
+
+    return { path: path.join(this.uploadsDir(), campaign.imageFilename), mimetype };
+  }
+
+  private async deleteImageFile(filename: string): Promise<void> {
+    try {
+      await fs.unlink(path.join(this.uploadsDir(), filename));
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        this.logger.warn(`Não foi possível remover imagem antiga "${filename}": ${err.message}`);
+      }
     }
   }
 
@@ -145,6 +219,11 @@ export class CampaignsService {
     const contactsById = new Map(contacts.map((c) => [c.id, c]));
     const orderedContacts = dto.contactIds.map((cid) => contactsById.get(cid)!);
 
+    // ver comentario em configuration.ts sobre a limitação com Meta Cloud API
+    const imageUrl = campaign.imageFilename
+      ? `${this.configService.get<string>('internalUrl')}/campaigns/${campaign.id}/image`
+      : undefined;
+
     const messageLogIds: string[] = [];
     let cursor = 0;
     for (let batchIndex = 0; batchIndex < batchSizes.length; batchIndex++) {
@@ -173,6 +252,7 @@ export class CampaignsService {
             to: contact.phone,
             text: campaign.text,
             skipRateLimit: mode === 'direct',
+            imageUrl,
           },
           { delay },
         );

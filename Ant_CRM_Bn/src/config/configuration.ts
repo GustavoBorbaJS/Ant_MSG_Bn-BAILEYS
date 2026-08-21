@@ -1,5 +1,14 @@
 export default () => ({
   port: parseInt(process.env.CRM_PORT, 10) || 3002,
+  // onde as imagens de campanha ficam salvas em disco (precisa de volume
+  // persistente no docker-compose - ver Dockerfile/compose)
+  uploadsDir: process.env.UPLOADS_DIR || './uploads',
+  // URL pela qual o Engine (container separado) alcança essa API pra baixar a
+  // imagem da campanha na hora de enviar - nome do serviço no docker-compose,
+  // resolve via DNS interno. So funciona pra instancias Baileys (mesma rede
+  // docker); Meta Cloud API precisaria de uma URL publica de verdade, o que
+  // nao é o caso hoje (META_INSTANCES nao usado em produção ainda).
+  internalUrl: process.env.CRM_INTERNAL_URL || 'http://crm-api:3002',
   // mesmo Postgres do worker (Ant_MSG_Bn) - mesmas envs, mesmo banco
   database: {
     host: process.env.DB_HOST || 'localhost',

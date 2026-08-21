@@ -60,6 +60,11 @@ export interface Contact {
   updatedAt: string;
 }
 
+// endpoint publico (sem auth) - ver Ant_CRM_Bn/src/campaigns/campaigns.controller.ts
+export function campaignImageUrl(campaignId: string): string {
+  return `/api/campaigns/${campaignId}/image`;
+}
+
 export interface ImportContactsResult {
   received: number;
   imported: number;
@@ -85,6 +90,7 @@ export interface Campaign {
   name: string;
   text: string;
   lastDispatchedAt: string | null;
+  imageFilename: string | null;
   createdAt: string;
   updatedAt: string;
   progress: CampaignProgress;
