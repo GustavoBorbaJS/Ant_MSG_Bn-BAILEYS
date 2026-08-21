@@ -165,6 +165,11 @@ export function ActivityPage() {
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLOR[log.status]}`}>
                     {STATUS_LABEL[log.status]}
                   </span>
+                  {log.status === 'failed' && log.errorMessage && (
+                    <p className="mt-0.5 max-w-xs truncate text-xs text-red-400" title={log.errorMessage}>
+                      {log.errorMessage}
+                    </p>
+                  )}
                 </td>
               </tr>
             ))}
