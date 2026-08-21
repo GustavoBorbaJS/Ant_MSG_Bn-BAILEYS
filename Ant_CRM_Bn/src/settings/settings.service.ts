@@ -38,6 +38,7 @@ export class SettingsService implements OnModuleInit, OnModuleDestroy {
       warmupDaysToWarm: this.configService.get('antiban.warmupDaysToWarm'),
       warmupDaysToHot: this.configService.get('antiban.warmupDaysToHot'),
       globalDailyLimit: this.configService.get('antiban.globalDailyLimit'),
+      userDailyMessageLimit: this.configService.get('antiban.userDailyMessageLimit'),
       trustedInstances: this.configService.get('antiban.trustedInstances'),
       limits: this.configService.get('antiban.limits'),
     };

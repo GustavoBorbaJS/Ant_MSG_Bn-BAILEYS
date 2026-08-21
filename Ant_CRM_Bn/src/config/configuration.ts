@@ -56,6 +56,10 @@ export default () => ({
       .map((id) => id.trim())
       .filter(Boolean),
     globalDailyLimit: parseInt(process.env.ANTIBAN_GLOBAL_DAILY_LIMIT, 10) || 1000,
+    // controle administrativo (nao e do worker/anti-ban) - teto de mensagens
+    // por dia pra usuarios com role 'user' (admin nao tem esse teto). Aplicado
+    // pelo CampaignsService.dispatch, inclusive em modo direto.
+    userDailyMessageLimit: parseInt(process.env.ANTIBAN_USER_DAILY_LIMIT, 10) || 500,
     limits: {
       cold: { perMinute: 2, perHour: 10, perDay: 40 },
       warm: { perMinute: 4, perHour: 30, perDay: 150 },

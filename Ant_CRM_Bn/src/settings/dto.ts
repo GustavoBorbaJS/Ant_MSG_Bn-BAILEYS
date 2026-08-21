@@ -42,6 +42,12 @@ export class UpdateAntibanConfigDto {
   @Min(1)
   globalDailyLimit: number;
 
+  // controle administrativo (nao e do worker) - teto diario de mensagens pra
+  // usuarios com role 'user'. Admin nao tem esse teto.
+  @IsInt()
+  @Min(1)
+  userDailyMessageLimit: number;
+
   @IsArray()
   @IsString({ each: true })
   trustedInstances: string[];

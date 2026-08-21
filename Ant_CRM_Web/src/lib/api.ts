@@ -46,6 +46,7 @@ export interface AntibanConfig {
   warmupDaysToWarm: number;
   warmupDaysToHot: number;
   globalDailyLimit: number;
+  userDailyMessageLimit: number;
   trustedInstances: string[];
   limits: Record<WarmupLevel, { perMinute: number; perHour: number; perDay: number }>;
 }

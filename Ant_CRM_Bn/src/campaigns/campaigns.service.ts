@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, MoreThanOrEqual, Repository } from 'typeorm';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -10,6 +10,7 @@ import { Contact } from '../database/entities/contact.entity';
 import { MessageLog } from '../database/entities/message-log.entity';
 import { QueueProducerService } from '../queue/queue-producer.service';
 import { InstanceOwnersService, RequesterInfo } from '../instance-owners/instance-owners.service';
+import { SettingsService } from '../settings/settings.service';
 import { CreateCampaignDto, DispatchCampaignDto, DispatchMode, UpdateCampaignDto } from './dto';
 
 type Progress = { pending: number; sent: number; failed: number };
@@ -32,6 +33,7 @@ export class CampaignsService {
     private readonly queueProducer: QueueProducerService,
     private readonly instanceOwners: InstanceOwnersService,
     private readonly configService: ConfigService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   private uploadsDir(): string {
@@ -163,6 +165,26 @@ export class CampaignsService {
     return progress;
   }
 
+  // Teto diario de mensagens por usuario (role 'user' - admin nao tem teto),
+  // configuravel em Configurações. Conta qualquer message_log já disparado
+  // hoje (pending/sent/failed - a tentativa em si já consumiu a cota),
+  // independente de campanha ou modo.
+  private async assertUserDailyLimit(userId: string, additionalCount: number): Promise<void> {
+    const { userDailyMessageLimit } = await this.settingsService.getConfig();
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const sentToday = await this.messageLogRepo.count({
+      where: { dispatchedBy: userId, createdAt: MoreThanOrEqual(startOfDay) },
+    });
+
+    const remaining = Math.max(0, userDailyMessageLimit - sentToday);
+    if (additionalCount > remaining) {
+      throw new BadRequestException(`Você só tem ${remaining} mensagens restantes no dia.`);
+    }
+  }
+
   // Mesmo caminho que Ant_MSG_Bn/scripts/enqueue-batch.js ja fazia manualmente:
   // insere message_logs 'pending' + enfileira na fila 'messages'. O worker
   // (MessageConsumer) processa esses jobs identico a qualquer outro - nao muda
@@ -184,6 +206,12 @@ export class CampaignsService {
     const contacts = await this.contactRepo.find({ where: { id: In(dto.contactIds), ownerId: requester.id } });
     if (contacts.length !== dto.contactIds.length) {
       throw new BadRequestException('Um ou mais contatos não foram encontrados');
+    }
+
+    // controle administrativo por usuario (nao e do anti-ban) - vale pros dois
+    // modos, inclusive direto, que so ignora o rate limit tecnico do worker
+    if (requester.role !== 'admin') {
+      await this.assertUserDailyLimit(requester.id, contacts.length);
     }
 
     const mode: DispatchMode = dto.mode === 'direct' ? 'direct' : 'auto';

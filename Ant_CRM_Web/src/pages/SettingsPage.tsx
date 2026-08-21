@@ -161,6 +161,23 @@ export function SettingsPage() {
 
         <div className="mb-6">
           <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+            Limite diário de mensagens por usuário (não afeta administradores)
+          </label>
+          <input
+            type="number"
+            min={1}
+            value={form.userDailyMessageLimit}
+            onChange={(e) => setForm({ ...form, userDailyMessageLimit: toNumber(e.target.value) })}
+            required
+            className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          />
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+            Vale pra qualquer usuário com papel "Usuário", inclusive no modo direto de disparo.
+          </p>
+        </div>
+
+        <div className="mb-6">
+          <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
             Instâncias confiáveis (sempre tratadas como "quente", separadas por vírgula)
           </label>
           <input
