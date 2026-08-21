@@ -19,4 +19,7 @@ COPY --from=builder /app/dist ./dist
 USER node
 
 EXPOSE 3002
-CMD ["node", "dist/main"]
+# Roda as migrations pendentes (idempotente - so aplica o que falta) antes de
+# subir a API. Garante que redeploy nunca sobe com schema desatualizado/vazio,
+# sem depender de alguem entrar no container e rodar migration:run:prod a mao.
+CMD ["sh", "-c", "npm run migration:run:prod && node dist/main"]
