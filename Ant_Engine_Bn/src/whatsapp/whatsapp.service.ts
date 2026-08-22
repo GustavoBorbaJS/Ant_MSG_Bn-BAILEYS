@@ -88,6 +88,9 @@ export class WhatsappService implements OnModuleDestroy {
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
+        // captura ANTES de sobrescrever pra 'disconnected' - decide se vale a
+        // pena reconectar sozinho ou nao
+        const wasConnected = record.status === 'connected';
 
         record.status = 'disconnected';
         this.logger.warn(
@@ -104,10 +107,20 @@ export class WhatsappService implements OnModuleDestroy {
           rm(authDir, { recursive: true, force: true }).catch((err) =>
             this.logger.error(`Falha ao limpar sessão de ${instanceId} após logout: ${err.message}`),
           );
-        } else {
+        } else if (wasConnected) {
+          // so reconecta sozinho se JA estava de verdade conectada (queda de
+          // rede, etc) - isso e uma recuperacao legitima
           this.connectInstance(instanceId).catch((err) =>
             this.logger.error(`Falha ao reconectar ${instanceId}: ${err.message}`),
           );
+        } else {
+          // fechou sem nunca ter conectado de verdade (QR gerado mas ninguem
+          // escaneou a tempo, handshake falhou, etc) - NAO fica tentando de
+          // novo sozinho pra sempre (gerava um loop infinito de QR novo a
+          // cada ~9s, visto em producao). So marca desconectado e espera o
+          // usuario clicar em "Parear"/"Ver QR" de novo quando estiver pronto.
+          this.instances.delete(instanceId);
+          this.logger.warn(`Instância ${instanceId}: pareamento não concluído, aguardando nova tentativa manual`);
         }
       }
     });
