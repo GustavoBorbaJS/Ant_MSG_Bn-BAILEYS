@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, campaignImageUrl } from '../lib/api';
 import type { Campaign, Contact, InstanceSummary, Paginated } from '../lib/api';
 import { Modal } from '../components/Modal';
+import { useCurrentUser } from '../lib/useCurrentUser';
 
 export function CampaignsPage() {
   const queryClient = useQueryClient();
@@ -257,6 +258,8 @@ function parseBatchSizes(input: string): number[] {
 
 function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { data: currentUser } = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin';
   const [instanceId, setInstanceId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<string | null>(null);
@@ -266,6 +269,11 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
   const [batchSizesInput, setBatchSizesInput] = useState('');
   const [batchIntervalMinutes, setBatchIntervalMinutes] = useState('5');
   const [acknowledgeRisk, setAcknowledgeRisk] = useState(false);
+  // Exclusivo admin: repete cada contato selecionado N vezes (ex: mandar
+  // 500x pro proprio numero pra testar a instância/fila) - ver
+  // Ant_CRM_Bn/src/campaigns/campaigns.service.ts (dispatch).
+  const [repeatCountInput, setRepeatCountInput] = useState('1');
+  const repeatCount = isAdmin ? Math.max(1, Number(repeatCountInput) || 1) : 1;
 
   const { data: instances } = useQuery({
     queryKey: ['instances'],
@@ -288,6 +296,7 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         acknowledgeRisk: mode === 'direct' ? true : undefined,
         batchSizes: mode === 'direct' && batchSizes.length > 0 ? batchSizes : undefined,
         batchIntervalMinutes: mode === 'direct' && batchSizes.length > 1 ? Number(batchIntervalMinutes) : undefined,
+        repeatCount: repeatCount > 1 ? repeatCount : undefined,
       });
     },
     onSuccess: (res) => {
@@ -319,9 +328,10 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
 
   const connectedInstances = instances?.filter((i) => i.status === 'connected') ?? [];
 
+  const totalMessages = selectedIds.size * repeatCount;
   const batchSizes = parseBatchSizes(batchSizesInput);
   const batchSum = batchSizes.reduce((a, b) => a + b, 0);
-  const batchSumMatches = batchSizesInput.trim() === '' || batchSum === selectedIds.size;
+  const batchSumMatches = batchSizesInput.trim() === '' || batchSum === totalMessages;
 
   const canSubmit =
     !!instanceId &&
@@ -376,6 +386,27 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         )}
       </div>
 
+      {isAdmin && (
+        <div className="mb-4">
+          <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+            Repetir cada contato (opcional, exclusivo admin)
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={5000}
+            value={repeatCountInput}
+            onChange={(e) => setRepeatCountInput(e.target.value)}
+            className="w-24 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          />
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+            Útil pra testar a instância/fila mandando várias mensagens pro seu próprio contato. Total: {totalMessages}{' '}
+            mensagem{totalMessages === 1 ? '' : 's'} ({selectedIds.size} contato{selectedIds.size === 1 ? '' : 's'} ×{' '}
+            {repeatCount}).
+          </p>
+        </div>
+      )}
+
       <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Modo de disparo</label>
       <div className="mb-3 grid grid-cols-2 gap-2">
         <button
@@ -414,7 +445,7 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
           </p>
 
           <label className="mb-1 block text-xs text-red-700 dark:text-red-400">
-            Lotes (opcional, ex: 200,100,200 — soma deve ser igual ao nº de contatos selecionados)
+            Lotes (opcional, ex: 200,100,200 — soma deve ser igual ao total de mensagens{repeatCount > 1 ? `, já com a repetição x${repeatCount}` : ''})
           </label>
           <input
             value={batchSizesInput}
@@ -424,7 +455,7 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
           />
           {!batchSumMatches && (
             <p className="mb-2 text-xs text-red-600 dark:text-red-400">
-              A soma dos lotes ({batchSum}) precisa ser igual ao nº de contatos selecionados ({selectedIds.size}).
+              A soma dos lotes ({batchSum}) precisa ser igual ao total de mensagens ({totalMessages}).
             </p>
           )}
 

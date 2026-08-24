@@ -208,14 +208,33 @@ export class CampaignsService {
       throw new BadRequestException('Um ou mais contatos não foram encontrados');
     }
 
+    // Repetir o mesmo disparo N vezes (ex: mandar 500x pro proprio numero pra
+    // testar a instancia/fila) e exclusivo de admin - a tela nem mostra a
+    // opção pra usuario comum, e o backend recusa mesmo que tentem forçar via
+    // chamada direta na API.
+    const repeatCount = dto.repeatCount ?? 1;
+    if (repeatCount > 1 && requester.role !== 'admin') {
+      throw new BadRequestException('Repetir o mesmo disparo várias vezes é uma opção exclusiva para administradores.');
+    }
+
+    // Preserva a ordem em que o usuario selecionou os contatos - e essa ordem
+    // que define quem cai em cada lote (ex: os 200 primeiros selecionados vao
+    // no 1o lote). repeatCount > 1 repete a lista inteira ANTES da divisão em
+    // lotes, entao tudo abaixo (validação de lote, limite diário) já opera
+    // sobre o total final de mensagens, repetição incluída.
+    const contactsById = new Map(contacts.map((c) => [c.id, c]));
+    const baseOrderedContacts = dto.contactIds.map((cid) => contactsById.get(cid)!);
+    const orderedContacts =
+      repeatCount > 1 ? Array.from({ length: repeatCount }, () => baseOrderedContacts).flat() : baseOrderedContacts;
+
     // controle administrativo por usuario (nao e do anti-ban) - vale pros dois
     // modos, inclusive direto, que so ignora o rate limit tecnico do worker
     if (requester.role !== 'admin') {
-      await this.assertUserDailyLimit(requester.id, contacts.length);
+      await this.assertUserDailyLimit(requester.id, orderedContacts.length);
     }
 
     const mode: DispatchMode = dto.mode === 'direct' ? 'direct' : 'auto';
-    let batchSizes: number[] = [contacts.length];
+    let batchSizes: number[] = [orderedContacts.length];
     let intervalMs = 0;
 
     if (mode === 'direct') {
@@ -225,11 +244,12 @@ export class CampaignsService {
         );
       }
 
-      batchSizes = dto.batchSizes?.length ? dto.batchSizes : [contacts.length];
+      batchSizes = dto.batchSizes?.length ? dto.batchSizes : [orderedContacts.length];
       const totalBatched = batchSizes.reduce((sum, n) => sum + n, 0);
-      if (totalBatched !== contacts.length) {
+      if (totalBatched !== orderedContacts.length) {
+        const repeatNote = repeatCount > 1 ? ` (já com a repetição x${repeatCount} aplicada)` : '';
         throw new BadRequestException(
-          `A soma dos lotes (${totalBatched}) precisa ser igual ao número de contatos selecionados (${contacts.length}).`,
+          `A soma dos lotes (${totalBatched}) precisa ser igual ao total de mensagens (${orderedContacts.length}${repeatNote}).`,
         );
       }
 
@@ -240,12 +260,6 @@ export class CampaignsService {
         intervalMs = dto.batchIntervalMinutes * 60_000;
       }
     }
-
-    // Preserva a ordem em que o usuario selecionou os contatos - e essa ordem
-    // que define quem cai em cada lote (ex: os 200 primeiros selecionados vao
-    // no 1o lote).
-    const contactsById = new Map(contacts.map((c) => [c.id, c]));
-    const orderedContacts = dto.contactIds.map((cid) => contactsById.get(cid)!);
 
     // ver comentario em configuration.ts sobre a limitação com Meta Cloud API
     const imageUrl = campaign.imageFilename
@@ -297,9 +311,16 @@ export class CampaignsService {
       );
     }
 
+    if (repeatCount > 1) {
+      this.logger.warn(
+        `Disparo REPETIDO ${repeatCount}x (exclusivo admin): campanha=${campaign.id} usuario=${requester.id} ` +
+          `instancia=${dto.instanceId} contatos_selecionados=${contacts.length} total_mensagens=${orderedContacts.length}`,
+      );
+    }
+
     campaign.lastDispatchedAt = new Date();
     await this.campaignRepo.save(campaign);
 
-    return { dispatched: messageLogIds.length, messageLogIds, mode, batchSizes };
+    return { dispatched: messageLogIds.length, messageLogIds, mode, batchSizes, repeatCount };
   }
 }

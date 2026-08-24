@@ -9,8 +9,14 @@ import {
   IsUUID,
   Length,
   Matches,
+  Max,
   Min,
 } from 'class-validator';
+
+// Teto de segurança pra repeatCount (ver DispatchCampaignDto abaixo) - so
+// admin usa essa opção, mas mesmo assim protege contra erro de digitação
+// (ex: 500000 em vez de 500) que travaria o worker/fila por horas.
+export const MAX_REPEAT_COUNT = 5000;
 
 export type DispatchMode = 'auto' | 'direct';
 
@@ -70,4 +76,13 @@ export class DispatchCampaignDto {
   @IsInt()
   @Min(1)
   batchIntervalMinutes?: number;
+
+  // Repete cada contato selecionado N vezes (ex: mandar 500x pro seu próprio
+  // número pra testar a instância/fila). Exclusivo de admin - ver
+  // CampaignsService.dispatch. Default 1 (comportamento normal).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_REPEAT_COUNT)
+  repeatCount?: number;
 }
