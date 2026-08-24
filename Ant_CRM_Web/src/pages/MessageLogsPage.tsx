@@ -160,6 +160,10 @@ export function MessageLogsPage() {
                     <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/40 dark:text-red-400">
                       Direto
                     </span>
+                  ) : log.dispatchMode === 'test' ? (
+                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
+                      Teste
+                    </span>
                   ) : (
                     <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
                   )}

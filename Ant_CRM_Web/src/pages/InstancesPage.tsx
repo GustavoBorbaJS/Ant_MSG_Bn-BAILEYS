@@ -1,7 +1,10 @@
 import { useState } from 'react';
+import type { FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { InstanceSummary, InstanceUsage } from '../lib/api';
+import { useCurrentUser } from '../lib/useCurrentUser';
+import { Modal } from '../components/Modal';
 
 const STATUS_LABEL: Record<InstanceSummary['status'], string> = {
   connected: 'Conectado',
@@ -25,8 +28,11 @@ const WARMUP_COLOR: Record<InstanceSummary['warmupLevel'], string> = {
 
 export function InstancesPage() {
   const queryClient = useQueryClient();
+  const { data: me } = useCurrentUser();
   const [pairingId, setPairingId] = useState<string | null>(null);
   const [newInstanceId, setNewInstanceId] = useState('');
+  const [testingInstanceId, setTestingInstanceId] = useState<string | null>(null);
+  const canDispatchTest = me?.role === 'admin' || me?.canDispatchTest === true;
 
   const { data: instances, isLoading } = useQuery({
     queryKey: ['instances'],
@@ -132,6 +138,15 @@ export function InstancesPage() {
                   >
                     Reconectar
                   </button>
+                  {canDispatchTest && (
+                    <button
+                      onClick={() => setTestingInstanceId(instance.instanceId)}
+                      className="mr-2 text-xs text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300"
+                      title="Reconecta a instância e envia uma mensagem de teste na hora - ferramenta de diagnóstico"
+                    >
+                      Disparo de teste
+                    </button>
+                  )}
                   <button
                     onClick={() => handleReset(instance.instanceId)}
                     className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
@@ -153,7 +168,85 @@ export function InstancesPage() {
       </div>
 
       {pairingId && <PairingDialog instanceId={pairingId} onClose={() => setPairingId(null)} />}
+      {testingInstanceId && (
+        <TestDispatchDialog instanceId={testingInstanceId} onClose={() => setTestingInstanceId(null)} />
+      )}
     </div>
+  );
+}
+
+function TestDispatchDialog({ instanceId, onClose }: { instanceId: string; onClose: () => void }) {
+  const [to, setTo] = useState('');
+  const [text, setText] = useState('');
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const dispatchMutation = useMutation({
+    mutationFn: () => api.post('/test-dispatch', { instanceId, to, text: text.trim() || undefined }),
+    onSuccess: () => setResult({ ok: true, message: 'Mensagem de teste enviada. Confira no celular do destinatário se ela carregou normalmente.' }),
+    onError: (err: any) =>
+      setResult({ ok: false, message: err.response?.data?.message || 'Não foi possível completar o disparo de teste.' }),
+  });
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setResult(null);
+    dispatchMutation.mutate();
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <h2 className="mb-1 font-semibold text-gray-900 dark:text-gray-100">Disparo de teste</h2>
+        <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+          Instância <span className="font-mono">{instanceId}</span>. Isso reconecta a sessão e envia a mensagem
+          imediatamente em seguida (fora do fluxo normal de disparo) - use só pra diagnóstico, não em contatos reais
+          de campanha.
+        </p>
+
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Número (com DDI/DDD)</label>
+        <input
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          required
+          placeholder="ex: 5511999999999"
+          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+        />
+
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Mensagem (opcional)</label>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={3}
+          placeholder="Deixe em branco pra usar a mensagem de teste padrão"
+          className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+        />
+
+        {result && (
+          <p
+            className={`mb-3 text-sm ${result.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
+          >
+            {result.message}
+          </p>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-md border border-gray-300 py-1.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+          >
+            Fechar
+          </button>
+          <button
+            type="submit"
+            disabled={dispatchMutation.isPending}
+            className="flex-1 rounded-md bg-purple-600 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {dispatchMutation.isPending ? 'Disparando...' : 'Disparar teste'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

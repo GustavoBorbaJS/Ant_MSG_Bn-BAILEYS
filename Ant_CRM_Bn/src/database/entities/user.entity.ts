@@ -31,6 +31,13 @@ export class User {
   @Column({ default: true })
   active: boolean;
 
+  // Libera o disparo de teste (reconecta a instância e manda a mensagem
+  // imediatamente em seguida, fora da fila normal - ver TestDispatchService).
+  // Admin sempre pode usar; usuário comum só se o admin marcar essa flag
+  // explicitamente pra ele (ver UsersController/UsersService.update).
+  @Column({ default: false })
+  canDispatchTest: boolean;
+
   // nome do arquivo em disco (uploads/avatars/), nao o path completo - ver
   // UsersService.setAvatar. Servido publicamente via GET /auth/users/:id/avatar
   // (mesmo padrao de Campaign.imageFilename - foto de perfil nao e sensivel).

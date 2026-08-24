@@ -45,6 +45,12 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Usuário bloqueado ou inexistente');
     }
 
+    // Aproveita essa consulta (ja feita pra checar "active") pra tambem
+    // colocar canDispatchTest fresco no request.user - assim revogar a
+    // permissao de disparo de teste vale na hora, sem precisar esperar o
+    // token expirar/re-logar (mesmo raciocinio do "active" acima).
+    request.user.canDispatchTest = user.canDispatchTest;
+
     return true;
   }
 }
