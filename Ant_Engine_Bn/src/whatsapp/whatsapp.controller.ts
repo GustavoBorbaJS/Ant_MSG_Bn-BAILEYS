@@ -13,6 +13,7 @@ import {
 import { WhatsappService } from './whatsapp.service';
 import { MetaCloudService } from '../meta-cloud/meta-cloud.service';
 import { InstanceIdDto, SendDto } from './dto';
+import { InstanceNotConnectedError, InvalidRecipientError } from './errors';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -40,10 +41,22 @@ export class WhatsappController {
   async send(@Body() body: SendDto) {
     try {
       if (this.metaCloudService.hasInstance(body.instanceId)) {
-        return await this.metaCloudService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl);
+        return await this.metaCloudService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl, body.messageId);
       }
-      return await this.whatsappService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl);
+      return await this.whatsappService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl, body.messageId);
     } catch (err) {
+      // Status distintos por causa, pra quem consome (Ant_MSG_Bn/src/queue/queue.consumer.ts)
+      // conseguir decidir "vale a pena retentar" sem precisar adivinhar por
+      // texto de mensagem de erro:
+      //   400 = destinatario invalido (nao adianta retentar)
+      //   409 = instancia desconectada (transitorio - deve retentar/aguardar reconexao)
+      //   503 = qualquer outra falha de envio (default, transitorio)
+      if (err instanceof InvalidRecipientError) {
+        throw new HttpException(err.message, HttpStatus.BAD_REQUEST);
+      }
+      if (err instanceof InstanceNotConnectedError) {
+        throw new HttpException(err.message, HttpStatus.CONFLICT);
+      }
       throw new HttpException(err.message, HttpStatus.SERVICE_UNAVAILABLE);
     }
   }

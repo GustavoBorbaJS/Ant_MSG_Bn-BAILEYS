@@ -20,7 +20,11 @@ export class EngineService {
     });
   }
 
-  async sendRaw(instanceId: string, to: string, text: string, imageUrl?: string): Promise<any> {
+  // messageId (messageLogId do CRM) vai como chave de idempotencia - se esse
+  // axios estourar o timeout (30s) mas a chamada anterior ainda estiver em
+  // voo no engine, o BullMQ retenta e chega aqui de novo com o MESMO
+  // messageId, permitindo o engine reaproveitar o envio em vez de duplicar.
+  async sendRaw(instanceId: string, to: string, text: string, imageUrl?: string, messageId?: string): Promise<any> {
     this.logger.debug(`Sending message from instance ${instanceId} to ${to}`);
 
     try {
@@ -29,6 +33,7 @@ export class EngineService {
         to,
         text,
         imageUrl,
+        messageId,
       });
 
       if (response.status !== 200) {

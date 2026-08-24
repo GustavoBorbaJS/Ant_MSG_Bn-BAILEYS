@@ -23,6 +23,15 @@ export class SendDto {
   @IsOptional()
   @IsUrl({ require_tld: false })
   imageUrl?: string;
+
+  // messageLogId do CRM (ver Ant_CRM_Bn/database/entities/message-log.entity.ts) -
+  // usado como chave de idempotência: se o worker retentar o MESMO /send (ex:
+  // o axios dele deu timeout mas a chamada anterior ainda está em andamento
+  // aqui), reaproveitamos a chamada em vez de mandar a mensagem 2x.
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  messageId?: string;
 }
 
 export class InstanceIdDto {

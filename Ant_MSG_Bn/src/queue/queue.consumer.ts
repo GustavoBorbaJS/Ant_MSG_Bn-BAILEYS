@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { DelayedError, Job, Queue, UnrecoverableError } from 'bullmq';
@@ -38,6 +38,12 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
   // reconexoes concorrentes, cada uma derrubando o socket que a anterior
   // acabou de recriar.
   private readonly reconnectNotBefore: Map<string, number> = new Map();
+  // Serializa o passo "delay humano + envio" por instância: com concorrência
+  // >1, sem isso N jobs da MESMA instância passavam pelo delay humano em
+  // paralelo e disparavam o /send quase juntos, gerando rajada em vez do
+  // espaçamento pretendido pelo anti-ban. Encadeamento de promises (mutex por
+  // instanceId) - instâncias diferentes continuam totalmente paralelas.
+  private readonly instanceLocks: Map<string, Promise<unknown>> = new Map();
 
   constructor(
     @InjectQueue('messages') private messageQueue: Queue,
@@ -95,12 +101,15 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
     this.processingQueue.add(messageLogId);
 
     try {
-      // Delay humano antes de enviar, para não ter um padrão robótico de timing
-      await this.antiBanService.applyHumanDelay();
-
-      // CHAMA A ENGINE
-      this.logger.debug(`Calling engine sendRaw for ${messageLogId}`);
-      const result = await this.engineService.sendRaw(instanceId, to, text, imageUrl);
+      // Delay humano + envio serializados por instância (ver instanceLocks) -
+      // so entao chama a engine, com messageLogId como chave de idempotencia
+      // (protege contra duplicar o envio se o axios do sendRaw der timeout
+      // enquanto o engine ainda esta processando a chamada anterior).
+      const result = await this.runExclusive(instanceId, async () => {
+        await this.antiBanService.applyHumanDelay();
+        this.logger.debug(`Calling engine sendRaw for ${messageLogId}`);
+        return this.engineService.sendRaw(instanceId, to, text, imageUrl, messageLogId);
+      });
 
       // ATUALIZA COMO SUCESSO
       await this.messageLogService.updateStatus(messageLogId, 'sent', {
@@ -212,12 +221,31 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
       .catch((err) => this.logger.error(`Falha ao pedir reconexão de ${instanceId}: ${err.message}`));
   }
 
+  // Encadeia execuções por instanceId via promise chaining - cada chamada só
+  // roda depois que a anterior (mesma instância) terminou, independente de
+  // sucesso ou falha. Instâncias diferentes têm cadeias independentes.
+  private runExclusive<T>(instanceId: string, fn: () => Promise<T>): Promise<T> {
+    const prior = this.instanceLocks.get(instanceId) ?? Promise.resolve();
+    const run = prior.catch(() => undefined).then(fn);
+    this.instanceLocks.set(instanceId, run.catch(() => undefined));
+    return run;
+  }
+
   /**
    * Classifica o erro para decidir se é permanente ou transitório
    */
   private classifyError(error: any): 'permanent' | 'transient' {
+    // Ant_Engine_Bn/src/whatsapp/whatsapp.controller.ts responde com status
+    // HTTP distintos por causa (ver comentário lá) - preferível a adivinhar
+    // por texto de mensagem de erro, que é frágil.
+    if (error instanceof HttpException) {
+      const status = error.getStatus();
+      if (status === HttpStatus.BAD_REQUEST) return 'permanent';
+      if (status === HttpStatus.CONFLICT || status === HttpStatus.SERVICE_UNAVAILABLE) return 'transient';
+    }
+
     const message = error.message?.toLowerCase() || '';
-    
+
     // Erros permanentes
     if (
       message.includes('instance not found') ||

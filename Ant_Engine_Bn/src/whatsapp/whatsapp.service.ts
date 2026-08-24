@@ -7,6 +7,7 @@ import { pino } from 'pino';
 import { Boom } from '@hapi/boom';
 import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, WASocket } from '@whiskeysockets/baileys';
 import { useEncryptedMultiFileAuthState } from './encrypted-auth-state';
+import { InstanceNotConnectedError, InvalidRecipientError } from './errors';
 
 export type InstanceStatus = 'connecting' | 'qr_code' | 'connected' | 'disconnected';
 
@@ -22,6 +23,12 @@ export class WhatsappService implements OnModuleDestroy {
   private readonly instances = new Map<string, InstanceRecord>();
   // evita duas conexoes concorrentes para a mesma instancia (ex: dois /connect quase simultaneos)
   private readonly connecting = new Map<string, Promise<{ status: InstanceStatus; qr?: string }>>();
+  // Chave de idempotencia (messageLogId) -> envio em andamento/recente. Sem
+  // isso, um timeout do axios do worker (30s) enquanto o sock.sendMessage
+  // ainda esta em voo faz o worker RETENTAR o mesmo /send - se a 1a chamada
+  // acabar indo com sucesso segundos depois, a mensagem seria enviada 2x.
+  private readonly recentSends = new Map<string, Promise<{ messageId: string }>>();
+  private static readonly SEND_DEDUP_TTL_MS = 2 * 60_000;
 
   constructor(private configService: ConfigService) {}
 
@@ -195,19 +202,40 @@ export class WhatsappService implements OnModuleDestroy {
     return this.connectInstance(instanceId);
   }
 
-  async sendMessage(instanceId: string, to: string, text: string, imageUrl?: string): Promise<{ messageId: string }> {
+  async sendMessage(
+    instanceId: string,
+    to: string,
+    text: string,
+    imageUrl?: string,
+    idempotencyKey?: string,
+  ): Promise<{ messageId: string }> {
+    if (idempotencyKey) {
+      const existing = this.recentSends.get(idempotencyKey);
+      if (existing) {
+        this.logger.warn(`Envio duplicado detectado (messageId=${idempotencyKey}) - reaproveitando chamada em andamento/recente`);
+        return existing;
+      }
+    }
+
     const instance = this.instances.get(instanceId);
     if (!instance || instance.status !== 'connected') {
-      throw new Error(`Instance ${instanceId} is not connected`);
+      throw new InstanceNotConnectedError(`Instance ${instanceId} is not connected`);
     }
 
     const jid = await this.resolveJid(instance, to);
     // Baileys baixa a URL sozinho (não precisamos buscar os bytes aqui) - texto
     // da campanha vira legenda quando tem imagem
     const content = imageUrl ? { image: { url: imageUrl }, caption: text } : { text };
-    const result = await instance.sock.sendMessage(jid, content);
+    const sendPromise = instance.sock.sendMessage(jid, content).then((result) => ({ messageId: result?.key?.id }));
 
-    return { messageId: result?.key?.id };
+    if (idempotencyKey) {
+      this.recentSends.set(idempotencyKey, sendPromise);
+      sendPromise.catch(() => undefined).finally(() => {
+        setTimeout(() => this.recentSends.delete(idempotencyKey), WhatsappService.SEND_DEDUP_TTL_MS).unref();
+      });
+    }
+
+    return sendPromise;
   }
 
   async checkNumber(instanceId: string, to: string): Promise<{ exists: boolean; jid?: string }> {
@@ -232,7 +260,7 @@ export class WhatsappService implements OnModuleDestroy {
     const [result] = (await instance.sock.onWhatsApp(digits)) || [];
 
     if (!result?.exists) {
-      throw new Error(`Número ${to} não está registrado no WhatsApp (verificado via onWhatsApp)`);
+      throw new InvalidRecipientError(`Número ${to} não está registrado no WhatsApp (verificado via onWhatsApp)`);
     }
 
     return result.jid;
