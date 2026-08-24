@@ -14,6 +14,7 @@ export function CampaignsPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Campaign | 'new' | null>(null);
   const [dispatching, setDispatching] = useState<Campaign | null>(null);
+  const [retrying, setRetrying] = useState<Campaign | null>(null);
 
   const { data: campaigns, isLoading } = useQuery({
     queryKey: ['campaigns'],
@@ -83,6 +84,14 @@ export function CampaignsPage() {
                   >
                     Disparar
                   </button>
+                  {campaign.progress.failed > 0 && (
+                    <button
+                      onClick={() => setRetrying(campaign)}
+                      className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-900/20"
+                    >
+                      Reenviar falhas ({campaign.progress.failed})
+                    </button>
+                  )}
                   <button
                     onClick={() => setEditing(campaign)}
                     className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
@@ -125,7 +134,77 @@ export function CampaignsPage() {
 
       {editing && <CampaignFormModal campaign={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
       {dispatching && <DispatchModal campaign={dispatching} onClose={() => setDispatching(null)} />}
+      {retrying && <RetryFailedModal campaign={retrying} onClose={() => setRetrying(null)} />}
     </div>
+  );
+}
+
+function RetryFailedModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [instanceId, setInstanceId] = useState('');
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: instances } = useQuery({
+    queryKey: ['instances'],
+    queryFn: async () => (await api.get<InstanceSummary[]>('/instances')).data,
+  });
+
+  const connectedInstances = instances?.filter((i) => i.status === 'connected') ?? [];
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.post(`/campaigns/${campaign.id}/retry-failed`, { instanceId }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['campaigns'] });
+      setResult(`${res.data.retried} mensagem(ns) reenfileirada(s) pra reenvio.`);
+      setError(null);
+    },
+    onError: (err: any) => setError(err.response?.data?.message || 'Não foi possível reenviar.'),
+  });
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="mb-1 font-semibold text-gray-900 dark:text-gray-100">Reenviar falhas — "{campaign.name}"</h2>
+      <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        {campaign.progress.failed} mensagem(ns) marcada(s) como falha nessa campanha vão ser reenfileiradas como novas
+        tentativas, respeitando o anti-ban. Os registros antigos continuam no histórico.
+      </p>
+
+      <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+        Instância pra reenviar (pode ser diferente da original, ex: se aquela caiu/nunca conectou)
+      </label>
+      <select
+        value={instanceId}
+        onChange={(e) => setInstanceId(e.target.value)}
+        className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+      >
+        <option value="">Selecione...</option>
+        {connectedInstances.map((i) => (
+          <option key={i.instanceId} value={i.instanceId}>
+            {i.instanceId} ({i.warmupLevel})
+          </option>
+        ))}
+      </select>
+
+      {error && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {result && <p className="mb-3 text-sm text-green-600 dark:text-green-400">{result}</p>}
+
+      <div className="flex gap-2">
+        <button
+          onClick={onClose}
+          className="flex-1 rounded-md border border-gray-300 py-1.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+        >
+          Fechar
+        </button>
+        <button
+          onClick={() => retryMutation.mutate()}
+          disabled={!instanceId || retryMutation.isPending}
+          className="flex-1 rounded-md bg-red-600 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-red-500"
+        >
+          {retryMutation.isPending ? 'Reenviando...' : 'Reenviar falhas'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

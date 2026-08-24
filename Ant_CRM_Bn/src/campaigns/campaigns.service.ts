@@ -11,7 +11,7 @@ import { MessageLog } from '../database/entities/message-log.entity';
 import { QueueProducerService } from '../queue/queue-producer.service';
 import { InstanceOwnersService, RequesterInfo } from '../instance-owners/instance-owners.service';
 import { SettingsService } from '../settings/settings.service';
-import { CreateCampaignDto, DispatchCampaignDto, DispatchMode, UpdateCampaignDto } from './dto';
+import { CreateCampaignDto, DispatchCampaignDto, DispatchMode, RetryFailedDto, UpdateCampaignDto } from './dto';
 
 type Progress = { pending: number; sent: number; failed: number };
 
@@ -356,5 +356,79 @@ export class CampaignsService {
       repeatCount,
       scheduledAt: scheduledAt?.toISOString() ?? null,
     };
+  }
+
+  // Reenvia mensagens que falharam nessa campanha SEM precisar re-selecionar
+  // contatos - reaproveita to/text/contactId de cada message_log 'failed' e
+  // cria uma nova tentativa 'pending' pra cada uma. instanceId pode ser
+  // diferente do original de proposito: o caso comum e a instancia original
+  // ter caido/nunca conectado (ver ensureInstanceReady em
+  // Ant_MSG_Bn/src/queue/queue.consumer.ts, que desiste apos ~20min e marca
+  // 'failed') e o usuario reenviar usando outra instancia ja reconectada.
+  // O log antigo NAO e apagado nem alterado - fica como registro historico
+  // da tentativa que falhou; a nova tentativa e uma linha nova.
+  async retryFailed(id: string, dto: RetryFailedDto, requester: RequesterInfo) {
+    const campaign = await this.findOne(id, requester.id);
+
+    await this.instanceOwners.assertAccess(dto.instanceId, requester);
+
+    const failedLogs = await this.messageLogRepo.find({
+      where: { campaignId: campaign.id, status: 'failed', dispatchedBy: requester.id },
+      order: { createdAt: 'ASC' },
+    });
+
+    if (failedLogs.length === 0) {
+      throw new BadRequestException('Não há mensagens falhadas pra reenviar nessa campanha.');
+    }
+
+    if (requester.role !== 'admin') {
+      await this.assertUserDailyLimit(requester.id, failedLogs.length);
+    }
+
+    const imageUrl = campaign.imageFilename
+      ? `${this.configService.get<string>('internalUrl')}/campaigns/${campaign.id}/image`
+      : undefined;
+    const isPdf = campaign.imageFilename?.toLowerCase().endsWith('.pdf');
+    const documentFileName = isPdf
+      ? `${campaign.name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'documento'}.pdf`
+      : undefined;
+
+    const messageLogIds: string[] = [];
+    for (const old of failedLogs) {
+      const messageLog = await this.messageLogRepo.save(
+        this.messageLogRepo.create({
+          instanceId: dto.instanceId,
+          to: old.to,
+          text: old.text,
+          status: 'pending',
+          campaignId: campaign.id,
+          contactId: old.contactId,
+          // reenvio sempre respeita o anti-ban, mesmo que a tentativa
+          // original tenha sido em modo direto - reenviar nao repete o
+          // "aceite de risco" original, entao nao herda o bypass.
+          dispatchMode: 'auto',
+          dispatchedBy: requester.id,
+        }),
+      );
+
+      await this.queueProducer.enqueue({
+        messageLogId: messageLog.id,
+        instanceId: dto.instanceId,
+        to: old.to,
+        text: old.text,
+        skipRateLimit: false,
+        imageUrl,
+        documentFileName,
+      });
+
+      messageLogIds.push(messageLog.id);
+    }
+
+    this.logger.log(
+      `Reenvio de falhas: campanha=${campaign.id} usuario=${requester.id} instancia=${dto.instanceId} ` +
+        `total=${messageLogIds.length}`,
+    );
+
+    return { retried: messageLogIds.length, messageLogIds };
   }
 }

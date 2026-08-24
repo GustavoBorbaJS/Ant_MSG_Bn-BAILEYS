@@ -18,7 +18,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { createReadStream } from 'fs';
 import { CampaignsService } from './campaigns.service';
-import { CreateCampaignDto, DispatchCampaignDto, UpdateCampaignDto } from './dto';
+import { CreateCampaignDto, DispatchCampaignDto, RetryFailedDto, UpdateCampaignDto } from './dto';
 import { Public } from '../common/public.decorator';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB - bem acima do que o WhatsApp costuma comprimir mesmo
@@ -87,5 +87,10 @@ export class CampaignsController {
   @Post(':id/dispatch')
   dispatch(@Param('id') id: string, @Body() dto: DispatchCampaignDto, @Req() req: any) {
     return this.campaignsService.dispatch(id, dto, { id: req.user.sub, role: req.user.role });
+  }
+
+  @Post(':id/retry-failed')
+  retryFailed(@Param('id') id: string, @Body() dto: RetryFailedDto, @Req() req: any) {
+    return this.campaignsService.retryFailed(id, dto, { id: req.user.sub, role: req.user.role });
   }
 }

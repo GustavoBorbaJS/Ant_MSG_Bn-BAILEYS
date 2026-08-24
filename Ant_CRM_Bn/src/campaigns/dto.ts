@@ -95,3 +95,12 @@ export class DispatchCampaignDto {
   @IsISO8601()
   scheduledAt?: string;
 }
+
+export class RetryFailedDto {
+  // Instância a usar no reenvio - pode ser diferente da que as mensagens
+  // originais tentaram (ex: aquela caiu/nunca conectou, essa aqui já
+  // reconectou). Ver CampaignsService.retryFailed.
+  @IsString()
+  @Matches(INSTANCE_ID_PATTERN, { message: 'instanceId deve conter apenas letras, números, _ ou -' })
+  instanceId: string;
+}
