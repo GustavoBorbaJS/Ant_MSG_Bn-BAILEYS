@@ -20,6 +20,19 @@ export default () => ({
     concurrency: parseInt(process.env.WORKER_CONCURRENCY, 10) || 5,
     retryAttempts: parseInt(process.env.WORKER_RETRY_ATTEMPTS, 10) || 3,
     retryDelay: parseInt(process.env.WORKER_RETRY_DELAY, 10) || 5000,
+    // Quanto tempo uma mensagem fica aguardando a instância reconectar antes
+    // de desistir de vez. NAO consome os "attempts" do BullMQ (é reagendamento,
+    // nao retry) - queda de conexão/QR pendente não deveria custar tentativas
+    // de envio, só tempo. Default 20min: cobre queda de rede, restart de
+    // container e reconexão pós-QR (515) sem exigir novo disparo manual.
+    instanceWaitTimeoutMs: parseInt(process.env.WORKER_INSTANCE_WAIT_TIMEOUT_MS, 10) || 20 * 60_000,
+    // Intervalo entre re-checagens de status enquanto aguarda a instância.
+    instanceRecheckDelayMs: parseInt(process.env.WORKER_INSTANCE_RECHECK_DELAY_MS, 10) || 10_000,
+    // Intervalo mínimo entre chamadas de /reconnect para a MESMA instância -
+    // evita que um lote de centenas de mensagens, todas encontrando a
+    // instância caída ao mesmo tempo, disparem reconexões concorrentes
+    // (cada uma derrubando/recriando o socket da anterior).
+    instanceReconnectCooldownMs: parseInt(process.env.WORKER_INSTANCE_RECONNECT_COOLDOWN_MS, 10) || 15_000,
   },
   antiban: {
     // delay humano aplicado antes de cada envio
