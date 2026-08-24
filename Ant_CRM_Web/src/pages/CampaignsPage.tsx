@@ -431,7 +431,7 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
           }`}
         >
           Direto (manual)
-          <span className="block text-xs font-normal opacity-80">Ignora os limites do anti-ban</span>
+          <span className="block text-xs font-normal opacity-80">Ignora os limites e o espaçamento do anti-ban</span>
         </button>
       </div>
 
@@ -439,9 +439,10 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         <div className="mb-4 rounded-md border border-red-300 bg-red-50 p-3 dark:border-red-900/60 dark:bg-red-900/20">
           <p className="mb-3 text-xs text-red-700 dark:text-red-400">
             No modo direto o disparo <strong>ignora</strong> os limites automáticos de aquecimento (por minuto/hora/dia)
-            do anti-ban para a instância selecionada. Isso aumenta bastante o risco desse número ser bloqueado ou
-            banido pelo WhatsApp. A decisão de usar esse modo é sua — fica registrada no histórico de mensagens
-            (usuário e horário do disparo).
+            E o espaçamento entre mensagens do anti-ban para a instância selecionada — o lote inteiro é empurrado no
+            ritmo que a instância aguentar, sem pausas artificiais. Isso aumenta bastante o risco desse número ser
+            bloqueado ou banido pelo WhatsApp. A decisão de usar esse modo é sua — fica registrada no histórico de
+            mensagens (usuário e horário do disparo).
           </p>
 
           <label className="mb-1 block text-xs text-red-700 dark:text-red-400">

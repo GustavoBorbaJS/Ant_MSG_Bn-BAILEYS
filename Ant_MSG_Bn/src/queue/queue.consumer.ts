@@ -105,8 +105,16 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
       // so entao chama a engine, com messageLogId como chave de idempotencia
       // (protege contra duplicar o envio se o axios do sendRaw der timeout
       // enquanto o engine ainda esta processando a chamada anterior).
+      // skipRateLimit (modo direto, risco assumido pelo usuario - ver
+      // CampaignsService.dispatch) tambem pula o delay humano aqui: sem isso,
+      // o disparo "direto" ainda ficava preso a 2-6s por mensagem (~500
+      // mensagens = ~30min só de delay) mesmo já tendo abdicado da proteção
+      // anti-ban. Com skipRateLimit, empurra o lote inteiro no ritmo que a
+      // instância aguentar.
       const result = await this.runExclusive(instanceId, async () => {
-        await this.antiBanService.applyHumanDelay();
+        if (!skipRateLimit) {
+          await this.antiBanService.applyHumanDelay();
+        }
         this.logger.debug(`Calling engine sendRaw for ${messageLogId}`);
         return this.engineService.sendRaw(instanceId, to, text, imageUrl, messageLogId);
       });
