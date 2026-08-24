@@ -47,7 +47,7 @@ export function Layout() {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <span className="flex shrink-0 items-center gap-2 font-semibold">
             <img src="/icon.png" alt="" className="h-7 w-7 rounded-full" />
-            <span className="hidden sm:inline">CRM local</span>
+            <span className="hidden sm:inline">DISPARA</span>
           </span>
 
           <nav className="hidden flex-1 flex-wrap gap-1 md:flex">
