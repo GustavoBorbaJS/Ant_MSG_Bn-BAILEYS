@@ -91,6 +91,12 @@ export class WhatsappService implements OnModuleDestroy {
         // captura ANTES de sobrescrever pra 'disconnected' - decide se vale a
         // pena reconectar sozinho ou nao
         const wasConnected = record.status === 'connected';
+        // 515 (restartRequired) e o handshake normal do Baileys logo apos o QR
+        // ser escaneado com sucesso - o WhatsApp fecha a conexao de proposito e
+        // espera o cliente reconectar pra concluir o login. Sem esse caso, um
+        // pareamento bem-sucedido caia no else abaixo (tratado como QR expirado
+        // sem ninguem escanear) e a instancia era apagada antes de logar de fato.
+        const restartRequired = statusCode === DisconnectReason.restartRequired;
 
         record.status = 'disconnected';
         this.logger.warn(
@@ -107,9 +113,10 @@ export class WhatsappService implements OnModuleDestroy {
           rm(authDir, { recursive: true, force: true }).catch((err) =>
             this.logger.error(`Falha ao limpar sessão de ${instanceId} após logout: ${err.message}`),
           );
-        } else if (wasConnected) {
-          // so reconecta sozinho se JA estava de verdade conectada (queda de
-          // rede, etc) - isso e uma recuperacao legitima
+        } else if (wasConnected || restartRequired) {
+          // reconecta sozinho se JA estava de verdade conectada (queda de rede,
+          // etc) OU se o WhatsApp pediu restart apos pareamento bem-sucedido
+          // (515) - em ambos os casos e uma recuperacao legitima, nao abandono
           this.connectInstance(instanceId).catch((err) =>
             this.logger.error(`Falha ao reconectar ${instanceId}: ${err.message}`),
           );
