@@ -31,6 +31,12 @@ export class User {
   @Column({ default: true })
   active: boolean;
 
+  // nome do arquivo em disco (uploads/avatars/), nao o path completo - ver
+  // UsersService.setAvatar. Servido publicamente via GET /auth/users/:id/avatar
+  // (mesmo padrao de Campaign.imageFilename - foto de perfil nao e sensivel).
+  @Column({ nullable: true })
+  avatarFilename: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

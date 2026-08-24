@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import type { CrmUser } from '../lib/api';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { Modal } from '../components/Modal';
+import { Avatar } from '../components/Avatar';
 
 const ROLE_LABEL: Record<CrmUser['role'], string> = { admin: 'Administrador', user: 'Usuário' };
 const ROLE_COLOR: Record<CrmUser['role'], string> = {
@@ -86,7 +87,12 @@ export function UsersPage() {
                 key={user.id}
                 className={`border-t border-gray-100 dark:border-gray-800 ${!user.active ? 'opacity-60' : ''}`}
               >
-                <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{user.name}</td>
+                <td className="px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <Avatar userId={user.id} name={user.name} avatarFilename={user.avatarFilename} size={26} />
+                    <span className="text-gray-900 dark:text-gray-100">{user.name}</span>
+                  </div>
+                </td>
                 <td className="px-4 py-2 font-mono text-gray-700 dark:text-gray-300">{user.username}</td>
                 <td className="px-4 py-2 text-gray-500 dark:text-gray-400">{user.email}</td>
                 <td className="px-4 py-2">

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import {
   Area,
   AreaChart,
@@ -13,6 +14,8 @@ import {
 } from 'recharts';
 import { api } from '../lib/api';
 import type { QueueDepth, TrafficPoint, WaitTimeBucket, WarmupOverviewItem } from '../lib/api';
+import { useCurrentUser } from '../lib/useCurrentUser';
+import { HistoryIcon, LayersIcon, PercentIcon, TrendUpIcon } from '../components/icons';
 
 const WARMUP_LABEL: Record<WarmupOverviewItem['warmupLevel'], string> = { cold: 'Frio', warm: 'Morno', hot: 'Quente' };
 const WARMUP_COLOR: Record<WarmupOverviewItem['warmupLevel'], string> = {
@@ -32,16 +35,48 @@ const QUEUE_LABEL: Record<keyof QueueDepth, string> = {
   'waiting-children': 'Aguard. filhos',
 };
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, icon, children }: { title: string; icon?: ReactNode; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-      <h2 className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">{title}</h2>
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
+        {icon}
+        {title}
+      </h2>
       {children}
     </div>
   );
 }
 
+function StatCard({
+  icon,
+  accent,
+  label,
+  value,
+  sublabel,
+}: {
+  icon: ReactNode;
+  accent: string;
+  label: string;
+  value: string;
+  sublabel?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
+          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
+          {sublabel && <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{sublabel}</p>}
+        </div>
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${accent}`}>{icon}</div>
+      </div>
+    </div>
+  );
+}
+
 export function DashboardPage() {
+  const { data: me } = useCurrentUser();
+
   const { data: traffic, isLoading: loadingTraffic } = useQuery({
     queryKey: ['analytics', 'traffic'],
     queryFn: async () => (await api.get<TrafficPoint[]>('/analytics/traffic', { params: { hours: 48 } })).data,
@@ -78,12 +113,47 @@ export function DashboardPage() {
       }))
     : [];
 
+  // Totais das últimas 48h, derivados do mesmo dado do gráfico de tráfego -
+  // sem chamada extra pro backend.
+  const totalSent = trafficData.reduce((sum, p) => sum + p.sent, 0);
+  const totalFailed = trafficData.reduce((sum, p) => sum + p.failed, 0);
+  const totalAttempted = totalSent + totalFailed;
+  const deliveryRate = totalAttempted > 0 ? ((totalSent / totalAttempted) * 100).toFixed(1) : null;
+  const connectedInstances = warmupOverview?.filter((i) => i.status === 'connected').length ?? 0;
+
   return (
     <div>
-      <h1 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Dashboard</h1>
+      <div className="mb-6">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {me ? `Bem-vindo de volta, ${me.name.split(' ')[0]}!` : 'Visão geral dos seus disparos.'}
+        </p>
+      </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card title="Tráfego (últimas 48h)">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard
+          icon={<TrendUpIcon className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />}
+          accent="bg-emerald-50 dark:bg-emerald-900/30"
+          label="Mensagens enviadas (48h)"
+          value={totalSent.toLocaleString('pt-BR')}
+        />
+        <StatCard
+          icon={<PercentIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />}
+          accent="bg-blue-50 dark:bg-blue-900/30"
+          label="Taxa de entrega (48h)"
+          value={deliveryRate !== null ? `${deliveryRate}%` : '—'}
+          sublabel={totalAttempted > 0 ? `${totalSent} de ${totalAttempted} tentativas` : 'Sem envios no período'}
+        />
+        <StatCard
+          icon={<LayersIcon className="h-5 w-5 text-purple-600 dark:text-purple-400" />}
+          accent="bg-purple-50 dark:bg-purple-900/30"
+          label="Instâncias conectadas"
+          value={`${connectedInstances}/${warmupOverview?.length ?? 0}`}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card title="Tráfego (últimas 48h)" icon={<TrendUpIcon className="h-4 w-4 text-gray-400" />}>
           {loadingTraffic && <p className="text-sm text-gray-500 dark:text-gray-400">Carregando...</p>}
           {!loadingTraffic && trafficData.length === 0 && (
             <p className="text-sm text-gray-400 dark:text-gray-500">Sem envios no período.</p>
@@ -104,7 +174,7 @@ export function DashboardPage() {
           )}
         </Card>
 
-        <Card title="Profundidade da fila (agora)">
+        <Card title="Profundidade da fila (agora)" icon={<LayersIcon className="h-4 w-4 text-gray-400" />}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={queueData} layout="vertical" margin={{ left: 24 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-800" />
@@ -116,7 +186,7 @@ export function DashboardPage() {
           </ResponsiveContainer>
         </Card>
 
-        <Card title="Tempo de espera até o envio (últimas 48h)">
+        <Card title="Tempo de espera até o envio (últimas 48h)" icon={<HistoryIcon className="h-4 w-4 text-gray-400" />}>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={waitTime ?? []}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-800" />
@@ -128,7 +198,7 @@ export function DashboardPage() {
           </ResponsiveContainer>
         </Card>
 
-        <Card title="Aquecimento por instância">
+        <Card title="Aquecimento por instância" icon={<PercentIcon className="h-4 w-4 text-gray-400" />}>
           <div className="space-y-3">
             {warmupOverview?.map((item) => (
               <div key={item.instanceId} className="rounded-md border border-gray-100 p-3 dark:border-gray-800">

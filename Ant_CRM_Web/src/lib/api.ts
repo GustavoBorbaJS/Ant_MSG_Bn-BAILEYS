@@ -106,8 +106,14 @@ export interface CrmUser {
   email: string;
   role: UserRole;
   active: boolean;
+  avatarFilename: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// endpoint publico (sem auth) - ver Ant_CRM_Bn/src/auth/auth.controller.ts (serveAvatar)
+export function userAvatarUrl(userId: string): string {
+  return `/api/auth/users/${userId}/avatar`;
 }
 
 export type MessageStatus = 'pending' | 'sent' | 'failed';
@@ -167,4 +173,5 @@ export interface CurrentUser {
   username: string;
   email: string;
   role: UserRole;
+  avatarFilename: string | null;
 }

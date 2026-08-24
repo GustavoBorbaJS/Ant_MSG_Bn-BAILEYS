@@ -4,6 +4,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { User } from '../database/entities/user.entity';
 import { CreateUserDto, UpdateUserDto } from './dto';
 
@@ -11,6 +13,12 @@ function generatePassword(): string {
   // 12 caracteres legiveis, alfanumericos - facil de digitar/compartilhar
   return crypto.randomBytes(9).toString('base64url');
 }
+
+const ALLOWED_AVATAR_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
 
 @Injectable()
 export class UsersService implements OnModuleInit {
@@ -135,6 +143,70 @@ export class UsersService implements OnModuleInit {
     const saved = await this.userRepo.save(user);
     const { passwordHash: _passwordHash, ...rest } = saved;
     return rest;
+  }
+
+  private avatarsDir(): string {
+    return path.join(this.configService.get<string>('uploadsDir'), 'avatars');
+  }
+
+  async setAvatar(id: string, file: Express.Multer.File): Promise<Omit<User, 'passwordHash'>> {
+    const user = await this.findOne(id);
+
+    const ext = ALLOWED_AVATAR_EXT[file.mimetype];
+    if (!ext) {
+      throw new BadRequestException('Formato não suportado (use JPEG, PNG ou WEBP).');
+    }
+
+    const oldFilename = user.avatarFilename;
+    const filename = `${user.id}-${crypto.randomBytes(6).toString('hex')}${ext}`;
+
+    await fs.mkdir(this.avatarsDir(), { recursive: true });
+    await fs.writeFile(path.join(this.avatarsDir(), filename), file.buffer);
+
+    user.avatarFilename = filename;
+    const saved = await this.userRepo.save(user);
+
+    if (oldFilename) {
+      await this.deleteAvatarFile(oldFilename);
+    }
+
+    const { passwordHash: _passwordHash, ...rest } = saved;
+    return rest;
+  }
+
+  async removeAvatar(id: string): Promise<Omit<User, 'passwordHash'>> {
+    const user = await this.findOne(id);
+    if (user.avatarFilename) {
+      await this.deleteAvatarFile(user.avatarFilename);
+      user.avatarFilename = null;
+      await this.userRepo.save(user);
+    }
+    const { passwordHash: _passwordHash, ...rest } = user;
+    return rest;
+  }
+
+  // Sem checagem de dono de proposito - chamado pelo endpoint publico
+  // (GET /auth/users/:id/avatar, ver AuthController) que serve a foto de
+  // qualquer usuario pra exibir em telas de outros usuarios (ex: lista de
+  // Usuarios do admin, "disparado por" na Atividade).
+  async getAvatarPath(id: string): Promise<{ path: string; mimetype: string } | null> {
+    const user = await this.userRepo.findOne({ where: { id } });
+    if (!user?.avatarFilename) return null;
+
+    const ext = path.extname(user.avatarFilename);
+    const mimetype = Object.entries(ALLOWED_AVATAR_EXT).find(([, e]) => e === ext)?.[0] || 'application/octet-stream';
+
+    return { path: path.join(this.avatarsDir(), user.avatarFilename), mimetype };
+  }
+
+  private async deleteAvatarFile(filename: string): Promise<void> {
+    try {
+      await fs.unlink(path.join(this.avatarsDir(), filename));
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        this.logger.warn(`Não foi possível remover avatar antigo "${filename}": ${err.message}`);
+      }
+    }
   }
 
   async remove(id: string, requesterId: string): Promise<void> {
