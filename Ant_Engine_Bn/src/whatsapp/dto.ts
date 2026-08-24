@@ -32,6 +32,14 @@ export class SendDto {
   @IsString()
   @Length(1, 64)
   messageId?: string;
+
+  // Presença = tratar imageUrl como um documento (PDF) em vez de imagem -
+  // vira o nome do arquivo exibido no WhatsApp. Ver
+  // Ant_CRM_Bn/src/campaigns/campaigns.service.ts (dispatch).
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  documentFileName?: string;
 }
 
 export class InstanceIdDto {

@@ -10,9 +10,13 @@ interface MessageJobData {
   // true = disparo em modo direto, pula o checkRateLimit no worker
   // (Ant_MSG_Bn/src/queue/queue.consumer.ts) - ver CampaignsService.dispatch
   skipRateLimit?: boolean;
-  // URL da imagem da campanha (servida por essa própria API) - ver
+  // URL da imagem/PDF da campanha (servida por essa própria API) - ver
   // CampaignsService.dispatch/getImagePath
   imageUrl?: string;
+  // Presença desse campo diz pra engine tratar imageUrl como um documento
+  // (PDF) em vez de imagem - ver CampaignsService.dispatch e
+  // Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts
+  documentFileName?: string;
 }
 
 // Produtor pra fila 'messages' que o worker (Ant_MSG_Bn/src/queue/queue.consumer.ts)

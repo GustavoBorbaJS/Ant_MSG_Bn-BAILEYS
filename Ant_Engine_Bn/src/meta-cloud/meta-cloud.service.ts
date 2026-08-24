@@ -47,6 +47,7 @@ export class MetaCloudService {
     text: string,
     imageUrl?: string,
     idempotencyKey?: string,
+    documentFileName?: string,
   ): Promise<{ messageId: string }> {
     if (idempotencyKey) {
       const existing = this.recentSends.get(idempotencyKey);
@@ -63,11 +64,20 @@ export class MetaCloudService {
 
     const url = `https://graph.facebook.com/${this.apiVersion}/${config.phoneNumberId}/messages`;
 
-    // A Meta Cloud API tambem so precisa da URL - ela baixa a imagem sozinha
-    // (precisa ser publicamente acessivel, nao so na rede interna do docker)
-    const payload = imageUrl
-      ? { messaging_product: 'whatsapp', to: this.toE164(to), type: 'image', image: { link: imageUrl, caption: text } }
-      : { messaging_product: 'whatsapp', to: this.toE164(to), type: 'text', text: { body: text } };
+    // A Meta Cloud API tambem so precisa da URL - ela baixa o arquivo sozinha
+    // (precisa ser publicamente acessivel, nao so na rede interna do docker).
+    // documentFileName presente = PDF (manda como "document"), senão
+    // imageUrl presente = imagem.
+    const payload = documentFileName
+      ? {
+          messaging_product: 'whatsapp',
+          to: this.toE164(to),
+          type: 'document',
+          document: { link: imageUrl, filename: documentFileName, caption: text },
+        }
+      : imageUrl
+        ? { messaging_product: 'whatsapp', to: this.toE164(to), type: 'image', image: { link: imageUrl, caption: text } }
+        : { messaging_product: 'whatsapp', to: this.toE164(to), type: 'text', text: { body: text } };
 
     const sendPromise = axios
       .post(url, payload, {

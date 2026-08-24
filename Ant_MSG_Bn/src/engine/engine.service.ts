@@ -24,7 +24,14 @@ export class EngineService {
   // axios estourar o timeout (30s) mas a chamada anterior ainda estiver em
   // voo no engine, o BullMQ retenta e chega aqui de novo com o MESMO
   // messageId, permitindo o engine reaproveitar o envio em vez de duplicar.
-  async sendRaw(instanceId: string, to: string, text: string, imageUrl?: string, messageId?: string): Promise<any> {
+  async sendRaw(
+    instanceId: string,
+    to: string,
+    text: string,
+    imageUrl?: string,
+    messageId?: string,
+    documentFileName?: string,
+  ): Promise<any> {
     this.logger.debug(`Sending message from instance ${instanceId} to ${to}`);
 
     try {
@@ -34,6 +41,7 @@ export class EngineService {
         text,
         imageUrl,
         messageId,
+        documentFileName,
       });
 
       if (response.status !== 200) {

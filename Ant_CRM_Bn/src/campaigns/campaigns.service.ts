@@ -15,11 +15,12 @@ import { CreateCampaignDto, DispatchCampaignDto, DispatchMode, UpdateCampaignDto
 
 type Progress = { pending: number; sent: number; failed: number };
 
-const ALLOWED_IMAGE_EXT: Record<string, string> = {
+const ALLOWED_ATTACHMENT_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
   'image/gif': '.gif',
+  'application/pdf': '.pdf',
 };
 
 @Injectable()
@@ -93,9 +94,9 @@ export class CampaignsService {
   async setImage(id: string, ownerId: string, file: Express.Multer.File): Promise<Campaign> {
     const campaign = await this.findOne(id, ownerId);
 
-    const ext = ALLOWED_IMAGE_EXT[file.mimetype];
+    const ext = ALLOWED_ATTACHMENT_EXT[file.mimetype];
     if (!ext) {
-      throw new BadRequestException('Formato de imagem não suportado (use JPEG, PNG, WEBP ou GIF).');
+      throw new BadRequestException('Formato não suportado (use JPEG, PNG, WEBP, GIF ou PDF).');
     }
 
     const oldFilename = campaign.imageFilename;
@@ -132,7 +133,7 @@ export class CampaignsService {
     if (!campaign?.imageFilename) return null;
 
     const ext = path.extname(campaign.imageFilename);
-    const mimetype = Object.entries(ALLOWED_IMAGE_EXT).find(([, e]) => e === ext)?.[0] || 'application/octet-stream';
+    const mimetype = Object.entries(ALLOWED_ATTACHMENT_EXT).find(([, e]) => e === ext)?.[0] || 'application/octet-stream';
 
     return { path: path.join(this.uploadsDir(), campaign.imageFilename), mimetype };
   }
@@ -261,9 +262,27 @@ export class CampaignsService {
       }
     }
 
+    // Agendamento: as message_logs sao criadas AGORA (aparecem como
+    // "pendente" no histórico), só o job na fila fica com delay até o
+    // horário escolhido - o worker (Ant_MSG_Bn/src/queue/queue.consumer.ts)
+    // não sabe nem precisa saber que foi agendado, processa igual a qualquer
+    // outro job quando o delay vence. Se vier no passado (ex: relógio do
+    // navegador adiantado), trata como imediato em vez de rejeitar.
+    const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
+    const scheduleDelayMs = scheduledAt ? Math.max(0, scheduledAt.getTime() - Date.now()) : 0;
+
     // ver comentario em configuration.ts sobre a limitação com Meta Cloud API
     const imageUrl = campaign.imageFilename
       ? `${this.configService.get<string>('internalUrl')}/campaigns/${campaign.id}/image`
+      : undefined;
+
+    // PDF vai como "document" no WhatsApp (nao "image") - o nome do arquivo
+    // extraido do proprio imageFilename ja diz qual e (ver ALLOWED_ATTACHMENT_EXT).
+    // Presença de documentFileName é o sinal que a engine usa pra decidir o
+    // tipo de mensagem (ver Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts).
+    const isPdf = campaign.imageFilename?.toLowerCase().endsWith('.pdf');
+    const documentFileName = isPdf
+      ? `${campaign.name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'documento'}.pdf`
       : undefined;
 
     const messageLogIds: string[] = [];
@@ -271,7 +290,7 @@ export class CampaignsService {
     for (let batchIndex = 0; batchIndex < batchSizes.length; batchIndex++) {
       const batchContacts = orderedContacts.slice(cursor, cursor + batchSizes[batchIndex]);
       cursor += batchSizes[batchIndex];
-      const delay = batchIndex * intervalMs;
+      const delay = scheduleDelayMs + batchIndex * intervalMs;
 
       for (const contact of batchContacts) {
         const messageLog = await this.messageLogRepo.save(
@@ -295,6 +314,7 @@ export class CampaignsService {
             text: campaign.text,
             skipRateLimit: mode === 'direct',
             imageUrl,
+            documentFileName,
           },
           { delay },
         );
@@ -318,9 +338,23 @@ export class CampaignsService {
       );
     }
 
+    if (scheduledAt) {
+      this.logger.log(
+        `Disparo AGENDADO pra ${scheduledAt.toISOString()}: campanha=${campaign.id} usuario=${requester.id} ` +
+          `instancia=${dto.instanceId} total_mensagens=${orderedContacts.length}`,
+      );
+    }
+
     campaign.lastDispatchedAt = new Date();
     await this.campaignRepo.save(campaign);
 
-    return { dispatched: messageLogIds.length, messageLogIds, mode, batchSizes, repeatCount };
+    return {
+      dispatched: messageLogIds.length,
+      messageLogIds,
+      mode,
+      batchSizes,
+      repeatCount,
+      scheduledAt: scheduledAt?.toISOString() ?? null,
+    };
   }
 }

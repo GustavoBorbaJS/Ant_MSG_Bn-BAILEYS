@@ -41,9 +41,23 @@ export class WhatsappController {
   async send(@Body() body: SendDto) {
     try {
       if (this.metaCloudService.hasInstance(body.instanceId)) {
-        return await this.metaCloudService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl, body.messageId);
+        return await this.metaCloudService.sendMessage(
+          body.instanceId,
+          body.to,
+          body.text,
+          body.imageUrl,
+          body.messageId,
+          body.documentFileName,
+        );
       }
-      return await this.whatsappService.sendMessage(body.instanceId, body.to, body.text, body.imageUrl, body.messageId);
+      return await this.whatsappService.sendMessage(
+        body.instanceId,
+        body.to,
+        body.text,
+        body.imageUrl,
+        body.messageId,
+        body.documentFileName,
+      );
     } catch (err) {
       // Status distintos por causa, pra quem consome (Ant_MSG_Bn/src/queue/queue.consumer.ts)
       // conseguir decidir "vale a pena retentar" sem precisar adivinhar por

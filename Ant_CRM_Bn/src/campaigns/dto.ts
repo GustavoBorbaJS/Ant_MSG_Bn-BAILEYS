@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
@@ -85,4 +86,12 @@ export class DispatchCampaignDto {
   @Min(1)
   @Max(MAX_REPEAT_COUNT)
   repeatCount?: number;
+
+  // Agenda o disparo pra um horário futuro (ISO 8601) em vez de imediato -
+  // as message_logs já são criadas agora (aparecem como "pendente" no
+  // histórico), só o envio de fato fica adiado até esse horário (ver
+  // CampaignsService.dispatch). Se vier no passado, dispara imediatamente.
+  @IsOptional()
+  @IsISO8601()
+  scheduledAt?: string;
 }

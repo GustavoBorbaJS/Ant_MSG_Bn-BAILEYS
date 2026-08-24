@@ -6,6 +6,10 @@ import type { Campaign, Contact, InstanceSummary, Paginated } from '../lib/api';
 import { Modal } from '../components/Modal';
 import { useCurrentUser } from '../lib/useCurrentUser';
 
+function isPdfFilename(filename?: string | null): boolean {
+  return !!filename && filename.toLowerCase().endsWith('.pdf');
+}
+
 export function CampaignsPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Campaign | 'new' | null>(null);
@@ -55,13 +59,18 @@ export function CampaignsPage() {
             >
               <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 gap-3">
-                  {campaign.imageFilename && (
-                    <img
-                      src={campaignImageUrl(campaign.id)}
-                      alt=""
-                      className="h-12 w-12 shrink-0 rounded-md object-cover"
-                    />
-                  )}
+                  {campaign.imageFilename &&
+                    (isPdfFilename(campaign.imageFilename) ? (
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-red-50 text-xs font-semibold text-red-600 dark:bg-red-900/30 dark:text-red-400">
+                        PDF
+                      </div>
+                    ) : (
+                      <img
+                        src={campaignImageUrl(campaign.id)}
+                        alt=""
+                        className="h-12 w-12 shrink-0 rounded-md object-cover"
+                      />
+                    ))}
                   <div className="min-w-0">
                     <h3 className="font-medium text-gray-900 dark:text-gray-100">{campaign.name}</h3>
                     <p className="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-400">{campaign.text}</p>
@@ -173,6 +182,9 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
   }
 
   const showCurrentImage = campaign?.imageFilename && !removeCurrentImage && !imagePreview;
+  const newFileIsPdf = imageFile ? isPdfFilename(imageFile.name) : false;
+  const currentIsPdf = isPdfFilename(campaign?.imageFilename);
+  const hasAttachment = imagePreview || showCurrentImage;
 
   return (
     <Modal onClose={onClose}>
@@ -190,7 +202,7 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
         />
 
         <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
-          Mensagem {(imagePreview || showCurrentImage) && '(legenda da imagem)'}
+          Mensagem {hasAttachment && '(legenda do anexo)'}
         </label>
         <textarea
           value={text}
@@ -200,26 +212,33 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
           className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         />
 
-        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Imagem (opcional)</label>
-        {(imagePreview || showCurrentImage) && (
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Imagem ou PDF (opcional)</label>
+        {hasAttachment && (
           <div className="mb-2 flex items-center gap-3">
-            <img
-              src={imagePreview ?? campaignImageUrl(campaign!.id)}
-              alt=""
-              className="h-16 w-16 rounded-md object-cover"
-            />
+            {(imageFile ? newFileIsPdf : currentIsPdf) ? (
+              <div className="flex h-16 w-16 items-center justify-center rounded-md bg-red-50 text-xs font-semibold text-red-600 dark:bg-red-900/30 dark:text-red-400">
+                PDF
+              </div>
+            ) : (
+              <img
+                src={imagePreview ?? campaignImageUrl(campaign!.id)}
+                alt=""
+                className="h-16 w-16 rounded-md object-cover"
+              />
+            )}
+            {imageFile && <span className="truncate text-xs text-gray-500 dark:text-gray-400">{imageFile.name}</span>}
             <button
               type="button"
               onClick={handleRemoveImage}
               className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
             >
-              Remover imagem
+              Remover anexo
             </button>
           </div>
         )}
         <input
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
+          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
           onChange={handleImageChange}
           className="mb-4 w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 dark:text-gray-400 dark:file:bg-gray-800 dark:file:text-gray-300"
         />
@@ -274,6 +293,11 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
   // Ant_CRM_Bn/src/campaigns/campaigns.service.ts (dispatch).
   const [repeatCountInput, setRepeatCountInput] = useState('1');
   const repeatCount = isAdmin ? Math.max(1, Number(repeatCountInput) || 1) : 1;
+  // Agendamento (opcional) - datetime-local nao tem timezone, entao o valor
+  // digitado e interpretado no fuso do navegador do usuario ao virar Date.
+  const [scheduledAtInput, setScheduledAtInput] = useState('');
+  const scheduledDate = scheduledAtInput ? new Date(scheduledAtInput) : null;
+  const scheduledInPast = !!scheduledDate && scheduledDate.getTime() <= Date.now();
 
   const { data: instances } = useQuery({
     queryKey: ['instances'],
@@ -297,11 +321,16 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         batchSizes: mode === 'direct' && batchSizes.length > 0 ? batchSizes : undefined,
         batchIntervalMinutes: mode === 'direct' && batchSizes.length > 1 ? Number(batchIntervalMinutes) : undefined,
         repeatCount: repeatCount > 1 ? repeatCount : undefined,
+        scheduledAt: scheduledDate && !scheduledInPast ? scheduledDate.toISOString() : undefined,
       });
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
-      setResult(`${res.data.dispatched} mensagem(ns) enfileirada(s).`);
+      setResult(
+        res.data.scheduledAt
+          ? `${res.data.dispatched} mensagem(ns) agendada(s) para ${new Date(res.data.scheduledAt).toLocaleString('pt-BR')}.`
+          : `${res.data.dispatched} mensagem(ns) enfileirada(s).`,
+      );
       setError(null);
     },
     onError: (err: any) => setError(err.response?.data?.message || 'Não foi possível disparar.'),
@@ -383,6 +412,37 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         ))}
         {contactsPage?.items.length === 0 && (
           <p className="px-3 py-3 text-center text-sm text-gray-400 dark:text-gray-500">Nenhum contato cadastrado.</p>
+        )}
+      </div>
+
+      <div className="mb-4">
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Agendar para (opcional)</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="datetime-local"
+            value={scheduledAtInput}
+            onChange={(e) => setScheduledAtInput(e.target.value)}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          />
+          {scheduledAtInput && (
+            <button
+              type="button"
+              onClick={() => setScheduledAtInput('')}
+              className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+            >
+              Cancelar agendamento
+            </button>
+          )}
+        </div>
+        {scheduledAtInput && scheduledInPast && (
+          <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+            Esse horário já passou — o disparo vai sair imediatamente ao confirmar.
+          </p>
+        )}
+        {scheduledAtInput && !scheduledInPast && (
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+            As mensagens já ficam registradas como pendentes agora, mas só saem a partir desse horário.
+          </p>
         )}
       </div>
 
@@ -507,7 +567,13 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
             mode === 'direct' ? 'bg-red-600 dark:bg-red-500' : 'bg-gray-900 dark:bg-gray-100 dark:text-gray-900'
           }`}
         >
-          {dispatchMutation.isPending ? 'Disparando...' : mode === 'direct' ? 'Disparar mesmo assim' : 'Disparar'}
+          {dispatchMutation.isPending
+            ? 'Disparando...'
+            : scheduledAtInput && !scheduledInPast
+              ? 'Agendar disparo'
+              : mode === 'direct'
+                ? 'Disparar mesmo assim'
+                : 'Disparar'}
         </button>
       </div>
     </Modal>

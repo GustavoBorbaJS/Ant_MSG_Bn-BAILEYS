@@ -208,6 +208,7 @@ export class WhatsappService implements OnModuleDestroy {
     text: string,
     imageUrl?: string,
     idempotencyKey?: string,
+    documentFileName?: string,
   ): Promise<{ messageId: string }> {
     if (idempotencyKey) {
       const existing = this.recentSends.get(idempotencyKey);
@@ -224,8 +225,13 @@ export class WhatsappService implements OnModuleDestroy {
 
     const jid = await this.resolveJid(instance, to);
     // Baileys baixa a URL sozinho (não precisamos buscar os bytes aqui) - texto
-    // da campanha vira legenda quando tem imagem
-    const content = imageUrl ? { image: { url: imageUrl }, caption: text } : { text };
+    // da campanha vira legenda quando tem imagem/documento. documentFileName
+    // presente = PDF (manda como "document"), senão imageUrl presente = imagem.
+    const content = documentFileName
+      ? { document: { url: imageUrl }, mimetype: 'application/pdf', fileName: documentFileName, caption: text }
+      : imageUrl
+        ? { image: { url: imageUrl }, caption: text }
+        : { text };
     const sendPromise = instance.sock.sendMessage(jid, content).then((result) => ({ messageId: result?.key?.id }));
 
     if (idempotencyKey) {

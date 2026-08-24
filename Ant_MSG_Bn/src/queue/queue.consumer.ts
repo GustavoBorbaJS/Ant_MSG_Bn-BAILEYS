@@ -14,9 +14,12 @@ interface MessageJobData {
   // true = job originado de um disparo em modo direto no CRM (usuario
   // confirmou ciencia do risco) - pula o checkRateLimit abaixo de proposito.
   skipRateLimit?: boolean;
-  // URL da imagem da campanha (servida pelo proprio crm-api) - o engine baixa
-  // sozinho, o worker so repassa a URL adiante
+  // URL da imagem/PDF da campanha (servida pelo proprio crm-api) - o engine
+  // baixa sozinho, o worker so repassa a URL adiante
   imageUrl?: string;
+  // presença = tratar imageUrl como documento (PDF) em vez de imagem - ver
+  // Ant_CRM_Bn/src/campaigns/campaigns.service.ts (dispatch)
+  documentFileName?: string;
   // timestamp (Date.now()) de quando o job encontrou a instancia desconectada
   // pela PRIMEIRA vez - usado pra limitar por quanto tempo total ficamos
   // reagendando em vez de desistir. Preenchido pelo proprio worker.
@@ -64,7 +67,7 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
   }
 
   async process(job: Job<MessageJobData>, token?: string): Promise<any> {
-    const { messageLogId, instanceId, to, text, skipRateLimit, imageUrl } = job.data;
+    const { messageLogId, instanceId, to, text, skipRateLimit, imageUrl, documentFileName } = job.data;
 
     this.logger.debug(`Processing job ${job.id} for message ${messageLogId}`);
 
@@ -116,7 +119,7 @@ export class MessageConsumer extends WorkerHost implements OnModuleInit {
           await this.antiBanService.applyHumanDelay();
         }
         this.logger.debug(`Calling engine sendRaw for ${messageLogId}`);
-        return this.engineService.sendRaw(instanceId, to, text, imageUrl, messageLogId);
+        return this.engineService.sendRaw(instanceId, to, text, imageUrl, messageLogId, documentFileName);
       });
 
       // ATUALIZA COMO SUCESSO
