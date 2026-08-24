@@ -45,6 +45,7 @@ export function MessageLogsPage() {
         })
       ).data,
     placeholderData: (prev) => prev,
+    refetchInterval: 5000,
   });
 
   function updateFilter(setter: (value: string) => void, value: string) {
