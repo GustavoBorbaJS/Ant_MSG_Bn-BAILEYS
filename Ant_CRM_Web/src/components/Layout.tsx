@@ -9,6 +9,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { Watermark } from './Watermark';
 import { Modal } from './Modal';
 import { Avatar } from './Avatar';
+import { InstallPrompt } from './InstallPrompt';
 import {
   ActivityIcon,
   CameraIcon,
@@ -152,6 +153,8 @@ export function Layout() {
       </div>
 
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
+
+      <InstallPrompt />
     </div>
   );
 }

@@ -1,0 +1,18 @@
+{
+  "name": "Dispara CRM",
+  "short_name": "Dispara",
+  "description": "CRM de disparo de mensagens",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#059669",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "243x221",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
