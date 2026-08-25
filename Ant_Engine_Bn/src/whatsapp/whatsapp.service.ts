@@ -9,12 +9,13 @@ import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, WASocket } f
 import { useEncryptedMultiFileAuthState } from './encrypted-auth-state';
 import { InstanceNotConnectedError, InvalidRecipientError } from './errors';
 
-export type InstanceStatus = 'connecting' | 'qr_code' | 'connected' | 'disconnected';
+export type InstanceStatus = 'connecting' | 'qr_code' | 'pairing_code' | 'connected' | 'disconnected';
 
 interface InstanceRecord {
   sock: WASocket;
   status: InstanceStatus;
   qr?: string;
+  pairingCode?: string;
 }
 
 @Injectable()
@@ -22,7 +23,7 @@ export class WhatsappService implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsappService.name);
   private readonly instances = new Map<string, InstanceRecord>();
   // evita duas conexoes concorrentes para a mesma instancia (ex: dois /connect quase simultaneos)
-  private readonly connecting = new Map<string, Promise<{ status: InstanceStatus; qr?: string }>>();
+  private readonly connecting = new Map<string, Promise<{ status: InstanceStatus; qr?: string; pairingCode?: string }>>();
   // Chave de idempotencia (messageLogId) -> envio em andamento/recente. Sem
   // isso, um timeout do axios do worker (30s) enquanto o sock.sendMessage
   // ainda esta em voo faz o worker RETENTAR o mesmo /send - se a 1a chamada
@@ -38,10 +39,12 @@ export class WhatsappService implements OnModuleDestroy {
     }
   }
 
-  async connectInstance(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+  // phoneNumber presente = pedir codigo de pareamento (Baileys
+  // requestPairingCode) em vez de esperar o QR - ver openConnection.
+  async connectInstance(instanceId: string, phoneNumber?: string): Promise<{ status: InstanceStatus; qr?: string; pairingCode?: string }> {
     const existing = this.instances.get(instanceId);
     if (existing && (existing.status === 'connected' || existing.status === 'connecting')) {
-      return { status: existing.status, qr: existing.qr };
+      return { status: existing.status, qr: existing.qr, pairingCode: existing.pairingCode };
     }
 
     const inFlight = this.connecting.get(instanceId);
@@ -49,7 +52,7 @@ export class WhatsappService implements OnModuleDestroy {
       return inFlight;
     }
 
-    const promise = this.openConnection(instanceId);
+    const promise = this.openConnection(instanceId, phoneNumber);
     this.connecting.set(instanceId, promise);
     try {
       return await promise;
@@ -58,7 +61,7 @@ export class WhatsappService implements OnModuleDestroy {
     }
   }
 
-  private async openConnection(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+  private async openConnection(instanceId: string, phoneNumber?: string): Promise<{ status: InstanceStatus; qr?: string; pairingCode?: string }> {
     const sessionsDir = this.configService.get<string>('sessionsDir');
     const authDir = path.join(sessionsDir, instanceId);
     const { state, saveCreds } = await useEncryptedMultiFileAuthState(authDir);
@@ -80,7 +83,10 @@ export class WhatsappService implements OnModuleDestroy {
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      if (qr) {
+      // So trata o QR se ninguem pediu codigo de pareamento pra essa conexao -
+      // o Baileys ainda emite 'qr' mesmo depois do requestPairingCode, e sem
+      // essa guarda o status voltava de 'pairing_code' pra 'qr_code' sozinho.
+      if (qr && !record.pairingCode) {
         record.qr = await QRCode.toDataURL(qr);
         record.status = 'qr_code';
         this.logger.log(`Instância ${instanceId}: QR code gerado, aguardando pareamento`);
@@ -89,6 +95,7 @@ export class WhatsappService implements OnModuleDestroy {
       if (connection === 'open') {
         record.status = 'connected';
         record.qr = undefined;
+        record.pairingCode = undefined;
         this.logger.log(`Instância ${instanceId}: conectada`);
       }
 
@@ -139,7 +146,29 @@ export class WhatsappService implements OnModuleDestroy {
       }
     });
 
-    // aguarda o primeiro evento relevante (qr pronto, conectado, ou fechado) antes de responder
+    // Pareamento por codigo (alternativa ao QR - ver README do Baileys): pedido
+    // DEPOIS dos listeners acima registrados (senao um connection.update que
+    // dispare durante o await abaixo passaria batido). So faz sentido pra uma
+    // sessao ainda nao registrada (credenciais novas) - uma sessao ja pareada
+    // reconecta sozinha via creds salvas, sem QR nem codigo.
+    if (phoneNumber && !sock.authState.creds.registered) {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber);
+        record.pairingCode = code;
+        record.status = 'pairing_code';
+        this.logger.log(`Instância ${instanceId}: código de pareamento gerado, aguardando pareamento`);
+      } catch (err) {
+        this.logger.error(`Falha ao gerar código de pareamento pra ${instanceId}: ${err.message}`);
+        // Sem isso, se nenhum QR chegar como fallback, o status ficava preso
+        // em 'connecting' pra sempre - o check() abaixo nunca resolvia sozinho
+        // e o caller (HTTP /connect) só descobria via timeout do axios (30s).
+        // Marca como desconectado e encerra o socket pra falhar rápido e claro.
+        sock.end(undefined);
+        this.instances.delete(instanceId);
+      }
+    }
+
+    // aguarda o primeiro evento relevante (qr/codigo pronto, conectado, ou fechado) antes de responder
     return new Promise((resolve) => {
       const check = () => {
         const current = this.instances.get(instanceId);
@@ -148,7 +177,7 @@ export class WhatsappService implements OnModuleDestroy {
           return;
         }
         if (current.status !== 'connecting') {
-          resolve({ status: current.status, qr: current.qr });
+          resolve({ status: current.status, qr: current.qr, pairingCode: current.pairingCode });
           return;
         }
         setTimeout(check, 200);
@@ -174,15 +203,15 @@ export class WhatsappService implements OnModuleDestroy {
     await rm(authDir, { recursive: true, force: true });
   }
 
-  async getStatus(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+  async getStatus(instanceId: string): Promise<{ status: InstanceStatus; qr?: string; pairingCode?: string }> {
     const instance = this.instances.get(instanceId);
     if (!instance) {
       return { status: 'disconnected' };
     }
-    return { status: instance.status, qr: instance.qr };
+    return { status: instance.status, qr: instance.qr, pairingCode: instance.pairingCode };
   }
 
-  async reconnect(instanceId: string): Promise<{ status: InstanceStatus; qr?: string }> {
+  async reconnect(instanceId: string): Promise<{ status: InstanceStatus; qr?: string; pairingCode?: string }> {
     // Se ja tem uma conexao em andamento (ex: outro job do worker, processando
     // em paralelo pra essa mesma instancia, pediu reconnect ao mesmo tempo),
     // so espera ela em vez de matar o socket no meio do handshake - sem essa

@@ -27,17 +27,19 @@ export class EngineClientService {
     return response.data;
   }
 
-  async getStatus(instanceId: string): Promise<{ status: string; qr?: string }> {
+  async getStatus(instanceId: string): Promise<{ status: string; qr?: string; pairingCode?: string }> {
     const response = await this.axios.get(`/status/${instanceId}`);
     return response.data;
   }
 
-  async connect(instanceId: string): Promise<{ status: string; qr?: string }> {
-    const response = await this.axios.post(`/instances/${instanceId}/connect`);
+  // phoneNumber presente = pede codigo de pareamento em vez de QR - ver
+  // Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts (requestPairingCode).
+  async connect(instanceId: string, phoneNumber?: string): Promise<{ status: string; qr?: string; pairingCode?: string }> {
+    const response = await this.axios.post(`/instances/${instanceId}/connect`, phoneNumber ? { phoneNumber } : undefined);
     return response.data;
   }
 
-  async reconnect(instanceId: string): Promise<{ status: string; qr?: string }> {
+  async reconnect(instanceId: string): Promise<{ status: string; qr?: string; pairingCode?: string }> {
     const response = await this.axios.post('/reconnect', { instanceId });
     return response.data;
   }

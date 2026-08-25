@@ -26,9 +26,11 @@ api.interceptors.response.use(
   },
 );
 
+export type InstanceStatus = 'connecting' | 'qr_code' | 'pairing_code' | 'connected' | 'disconnected';
+
 export interface InstanceSummary {
   instanceId: string;
-  status: 'connecting' | 'qr_code' | 'connected' | 'disconnected';
+  status: InstanceStatus;
   warmupLevel: 'cold' | 'warm' | 'hot';
   warmupAgeDays: number | null;
 }

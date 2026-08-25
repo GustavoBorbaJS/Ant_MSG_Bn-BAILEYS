@@ -48,3 +48,16 @@ export class InstanceIdDto {
   @Matches(INSTANCE_ID_PATTERN, { message: 'instanceId deve conter apenas letras, números, _ ou -' })
   instanceId: string;
 }
+
+// So digitos (com DDI, sem +/espacos/tracos) - exigencia do proprio
+// requestPairingCode do Baileys (ver README dele).
+const PHONE_NUMBER_PATTERN = /^[0-9]{8,15}$/;
+
+export class ConnectDto {
+  // Presenca = pedir codigo de pareamento em vez de esperar QR (ver
+  // WhatsappService.openConnection). Ausente = fluxo QR de sempre.
+  @IsOptional()
+  @IsString()
+  @Matches(PHONE_NUMBER_PATTERN, { message: 'phoneNumber deve conter só dígitos (com DDI), sem +, espaços ou traços' })
+  phoneNumber?: string;
+}

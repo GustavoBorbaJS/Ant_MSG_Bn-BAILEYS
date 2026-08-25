@@ -1,7 +1,8 @@
-import { BadRequestException, Controller, Delete, Get, Param, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Req } from '@nestjs/common';
 import { EngineClientService } from './engine-client.service';
 import { AntibanReadonlyService } from '../antiban-readonly/antiban-readonly.service';
 import { InstanceOwnersService } from '../instance-owners/instance-owners.service';
+import { ConnectInstanceDto } from './dto';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -40,7 +41,7 @@ export class InstancesController {
   }
 
   @Post(':instanceId/connect')
-  async connect(@Param('instanceId') instanceId: string, @Req() req: any) {
+  async connect(@Param('instanceId') instanceId: string, @Body() body: ConnectInstanceDto, @Req() req: any) {
     assertValidInstanceId(instanceId);
     const requester = { id: req.user.sub, role: req.user.role };
 
@@ -48,7 +49,7 @@ export class InstancesController {
     const instanceExistsInEngine = existingInstances.some((i) => i.instanceId === instanceId);
     await this.instanceOwners.resolveOwnerOnConnect(instanceId, requester, instanceExistsInEngine);
 
-    return this.engineClient.connect(instanceId);
+    return this.engineClient.connect(instanceId, body?.phoneNumber);
   }
 
   @Get(':instanceId/status')

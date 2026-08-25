@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { InstanceSummary, InstanceUsage } from '../lib/api';
@@ -6,6 +7,7 @@ import type { InstanceSummary, InstanceUsage } from '../lib/api';
 const STATUS_LABEL: Record<InstanceSummary['status'], string> = {
   connected: 'Conectado',
   qr_code: 'Aguardando QR',
+  pairing_code: 'Aguardando código',
   connecting: 'Conectando',
   disconnected: 'Desconectado',
 };
@@ -13,6 +15,7 @@ const STATUS_LABEL: Record<InstanceSummary['status'], string> = {
 const STATUS_COLOR: Record<InstanceSummary['status'], string> = {
   connected: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400',
   qr_code: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+  pairing_code: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
   connecting: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
   disconnected: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
@@ -34,12 +37,6 @@ export function InstancesPage() {
     refetchInterval: 5000,
   });
 
-  const connectMutation = useMutation({
-    mutationFn: (instanceId: string) => api.post(`/instances/${instanceId}/connect`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['instances'] }),
-    onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível conectar essa instância.'),
-  });
-
   const reconnectMutation = useMutation({
     mutationFn: (instanceId: string) => api.post(`/instances/${instanceId}/reconnect`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['instances'] }),
@@ -54,7 +51,6 @@ export function InstancesPage() {
 
   function startPairing(instanceId: string) {
     setPairingId(instanceId);
-    connectMutation.mutate(instanceId);
   }
 
   function handleReset(instanceId: string) {
@@ -124,7 +120,7 @@ export function InstancesPage() {
                     onClick={() => startPairing(instance.instanceId)}
                     className="mr-2 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
                   >
-                    Ver QR
+                    Parear
                   </button>
                   <button
                     onClick={() => reconnectMutation.mutate(instance.instanceId)}
@@ -157,8 +153,17 @@ export function InstancesPage() {
   );
 }
 
+type PairingMethod = 'qr' | 'code';
+
+function formatPairingCode(code: string): string {
+  return code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+}
+
 function PairingDialog({ instanceId, onClose }: { instanceId: string; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const [method, setMethod] = useState<PairingMethod | null>(null);
+  const [phoneNumber, setPhoneNumber] = useState(() => instanceId.replace(/\D/g, ''));
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   const { data: usage } = useQuery({
     queryKey: ['instance-usage', instanceId],
@@ -166,11 +171,21 @@ function PairingDialog({ instanceId, onClose }: { instanceId: string; onClose: (
     refetchInterval: 5000,
   });
 
+  const connectMutation = useMutation({
+    mutationFn: (body?: { phoneNumber: string }) => api.post(`/instances/${instanceId}/connect`, body),
+    onError: (err: any) => {
+      setCodeError(err.response?.data?.message || 'Não foi possível iniciar o pareamento.');
+      setMethod(null);
+    },
+  });
+
   const { data: status } = useQuery({
     queryKey: ['instance-status', instanceId],
-    queryFn: async () => (await api.get<{ status: string; qr?: string }>(`/instances/${instanceId}/status`)).data,
-    // QR do WhatsApp expira rápido (~20s) e o Baileys gera um novo sozinho -
-    // repolling curto mantém a imagem sempre válida na tela
+    queryFn: async () =>
+      (await api.get<{ status: string; qr?: string; pairingCode?: string }>(`/instances/${instanceId}/status`)).data,
+    enabled: connectMutation.isPending || connectMutation.isSuccess,
+    // QR/codigo do WhatsApp expiram rápido e o Baileys gera outro sozinho -
+    // repolling curto mantém sempre válido na tela
     refetchInterval: (query) => (query.state.data?.status === 'connected' ? false : 3000),
   });
 
@@ -178,27 +193,125 @@ function PairingDialog({ instanceId, onClose }: { instanceId: string; onClose: (
     queryClient.invalidateQueries({ queryKey: ['instances'] });
   }
 
+  function chooseQr() {
+    setCodeError(null);
+    setMethod('qr');
+    connectMutation.mutate(undefined);
+  }
+
+  function requestCode(e: FormEvent) {
+    e.preventDefault();
+    setCodeError(null);
+    setMethod('code');
+    connectMutation.mutate({ phoneNumber });
+  }
+
+  function backToMethodChoice() {
+    setMethod(null);
+    setCodeError(null);
+    // limpa isPending/data da tentativa anterior - senao trocar de QR pra
+    // código (ou vice-versa) pulava direto pra tela de espera com o estado
+    // velho, sem deixar digitar o telefone de novo
+    connectMutation.reset();
+  }
+
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-80 rounded-lg bg-white p-6 text-center shadow-lg dark:bg-gray-900">
         <h2 className="mb-1 font-semibold text-gray-900 dark:text-gray-100">{instanceId}</h2>
-        <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-          {status?.status === 'connected' ? 'Conectado!' : 'Escaneie com WhatsApp → Aparelhos conectados'}
-        </p>
 
-        {status?.status === 'connected' && <div className="py-8 text-4xl">✅</div>}
-
-        {status?.qr && status.status !== 'connected' && (
-          <img
-            src={status.qr}
-            alt="QR code"
-            className="mx-auto mb-2 w-56 rounded-md border border-gray-200 dark:border-gray-700"
-          />
+        {method === null && (
+          <>
+            <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">Como prefere conectar?</p>
+            <div className="mb-2 flex gap-2">
+              <button
+                onClick={chooseQr}
+                className="flex-1 rounded-md border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                QR code
+              </button>
+              <button
+                onClick={() => setMethod('code')}
+                className="flex-1 rounded-md border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Código
+              </button>
+            </div>
+          </>
         )}
 
-        {!status?.qr && status?.status !== 'connected' && (
-          <p className="py-8 text-sm text-gray-400 dark:text-gray-500">Gerando QR...</p>
+        {method === 'code' && !connectMutation.isPending && !connectMutation.data && (
+          <form onSubmit={requestCode} className="text-left">
+            <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Número (com DDI/DDD)</label>
+            <input
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+              required
+              placeholder="ex: 5511999999999"
+              className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={backToMethodChoice}
+                className="flex-1 rounded-md border border-gray-300 py-1.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+              >
+                Voltar
+              </button>
+              <button
+                type="submit"
+                className="flex-1 rounded-md bg-gray-900 py-1.5 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900"
+              >
+                Gerar código
+              </button>
+            </div>
+          </form>
         )}
+
+        {method !== null && (connectMutation.isPending || connectMutation.data) && (
+          <>
+            <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+              {status?.status === 'connected'
+                ? 'Conectado!'
+                : method === 'qr'
+                  ? 'Escaneie com WhatsApp → Aparelhos conectados'
+                  : 'No WhatsApp: Aparelhos conectados → Conectar com número de telefone → digite o código abaixo'}
+            </p>
+
+            {status?.status === 'connected' && <div className="py-8 text-4xl">✅</div>}
+
+            {method === 'qr' && status?.qr && status.status !== 'connected' && (
+              <img
+                src={status.qr}
+                alt="QR code"
+                className="mx-auto mb-2 w-56 rounded-md border border-gray-200 dark:border-gray-700"
+              />
+            )}
+
+            {method === 'code' && status?.pairingCode && status.status !== 'connected' && (
+              <div className="mb-2 rounded-md border border-gray-200 bg-gray-50 py-4 font-mono text-2xl font-semibold tracking-widest text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
+                {formatPairingCode(status.pairingCode)}
+              </div>
+            )}
+
+            {status?.status !== 'connected' && !status?.qr && !status?.pairingCode && (
+              <p className="py-8 text-sm text-gray-400 dark:text-gray-500">
+                {method === 'qr' ? 'Gerando QR...' : 'Gerando código...'}
+              </p>
+            )}
+
+            {status?.status !== 'connected' && (
+              <button
+                onClick={backToMethodChoice}
+                className="mb-2 text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+              >
+                Trocar método
+              </button>
+            )}
+          </>
+        )}
+
+        {codeError && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{codeError}</p>}
 
         {usage && (
           <p className="mb-3 text-xs text-gray-400 dark:text-gray-500">

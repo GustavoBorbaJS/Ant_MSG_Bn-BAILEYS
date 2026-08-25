@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { MetaCloudService } from '../meta-cloud/meta-cloud.service';
-import { InstanceIdDto, SendDto } from './dto';
+import { ConnectDto, InstanceIdDto, SendDto } from './dto';
 import { InstanceNotConnectedError, InvalidRecipientError } from './errors';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -97,9 +97,9 @@ export class WhatsappController {
   // Endpoints de gestao/pareamento (usados por uma futura tela de onboarding, ou manualmente)
   // Nao se aplicam a instancias Meta Cloud API (nao ha QR code / pareamento).
   @Post('instances/:instanceId/connect')
-  connect(@Param('instanceId') instanceId: string) {
+  connect(@Param('instanceId') instanceId: string, @Body() body: ConnectDto) {
     assertValidInstanceId(instanceId);
-    return this.whatsappService.connectInstance(instanceId);
+    return this.whatsappService.connectInstance(instanceId, body?.phoneNumber);
   }
 
   @Get('instances')
