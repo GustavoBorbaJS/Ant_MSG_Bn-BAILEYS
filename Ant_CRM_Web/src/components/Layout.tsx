@@ -22,6 +22,7 @@ import {
   LogoutIcon,
   MenuIcon,
   SettingsIcon,
+  TestTubeIcon,
   UsersIcon,
 } from './icons';
 
@@ -32,6 +33,11 @@ const navItems = [
   { to: '/instances', label: 'Instâncias', icon: InstancesIcon },
   { to: '/message-logs', label: 'Histórico', icon: HistoryIcon },
 ];
+
+// Item separado (nao entra em navItems/adminNavItems) - so aparece pra quem
+// tem acesso ao disparo de teste (admin ou canDispatchTest liberado - ver
+// TestDispatchRoute), fica visualmente isolado dos outros no fim do menu.
+const testDispatchItem = { to: '/test-dispatch', label: 'Disparo de teste', icon: TestTubeIcon };
 
 const adminNavItems = [
   { to: '/activity', label: 'Atividade', icon: ActivityIcon },
@@ -51,6 +57,7 @@ export function Layout() {
   }
 
   const items = me?.role === 'admin' ? [...navItems, ...adminNavItems] : navItems;
+  const canDispatchTest = me?.role === 'admin' || me?.canDispatchTest === true;
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium ${
@@ -77,6 +84,15 @@ export function Layout() {
               {item.label}
             </NavLink>
           ))}
+
+          {canDispatchTest && (
+            <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-800">
+              <NavLink to={testDispatchItem.to} className={linkClass}>
+                <testDispatchItem.icon className="h-[18px] w-[18px] shrink-0" />
+                {testDispatchItem.label}
+              </NavLink>
+            </div>
+          )}
         </nav>
 
         <div className="border-t border-gray-200 p-3 dark:border-gray-800">
@@ -134,6 +150,18 @@ export function Layout() {
                 {item.label}
               </NavLink>
             ))}
+
+            {canDispatchTest && (
+              <NavLink
+                to={testDispatchItem.to}
+                className={linkClass}
+                onClick={() => setMenuOpen(false)}
+              >
+                <testDispatchItem.icon className="h-[18px] w-[18px] shrink-0" />
+                {testDispatchItem.label}
+              </NavLink>
+            )}
+
             <div className="mt-2 flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-800">
               <ThemeToggle />
               <button

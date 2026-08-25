@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminRoute } from './components/AdminRoute';
+import { TestDispatchRoute } from './components/TestDispatchRoute';
 import { LoginPage } from './pages/LoginPage';
 import { InstancesPage } from './pages/InstancesPage';
 import { ContactsPage } from './pages/ContactsPage';
@@ -11,6 +12,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { MessageLogsPage } from './pages/MessageLogsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityPage } from './pages/ActivityPage';
+import { TestDispatchPage } from './pages/TestDispatchPage';
 
 export function App() {
   return (
@@ -30,6 +32,10 @@ export function App() {
             <Route path="/users" element={<UsersPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/activity" element={<ActivityPage />} />
+          </Route>
+
+          <Route element={<TestDispatchRoute />}>
+            <Route path="/test-dispatch" element={<TestDispatchPage />} />
           </Route>
         </Route>
       </Route>
