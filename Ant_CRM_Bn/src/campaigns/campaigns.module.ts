@@ -18,5 +18,6 @@ import { SettingsModule } from '../settings/settings.module';
   ],
   controllers: [CampaignsController],
   providers: [CampaignsService],
+  exports: [CampaignsService],
 })
 export class CampaignsModule {}

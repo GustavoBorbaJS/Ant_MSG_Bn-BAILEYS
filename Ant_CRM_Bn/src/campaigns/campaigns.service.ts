@@ -91,6 +91,19 @@ export class CampaignsService {
     }
   }
 
+  // Chamado quando um usuário é removido de vez (ver UsersService.remove) -
+  // campaigns.ownerId tem FK ON DELETE RESTRICT pra users, então precisa
+  // sumir com as campanhas (e as imagens em disco) ANTES de apagar o dono.
+  async removeAllOwnedBy(ownerId: string): Promise<void> {
+    const campaigns = await this.campaignRepo.find({ where: { ownerId } });
+    await this.campaignRepo.delete({ ownerId });
+    for (const campaign of campaigns) {
+      if (campaign.imageFilename) {
+        await this.deleteImageFile(campaign.imageFilename);
+      }
+    }
+  }
+
   async setImage(id: string, ownerId: string, file: Express.Multer.File): Promise<Campaign> {
     const campaign = await this.findOne(id, ownerId);
 

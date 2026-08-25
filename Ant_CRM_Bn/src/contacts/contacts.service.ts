@@ -111,4 +111,10 @@ export class ContactsService {
       throw new NotFoundException('Contato não encontrado');
     }
   }
+
+  // Chamado quando um usuário é removido de vez (ver UsersService.remove) -
+  // contacts.ownerId tem FK ON DELETE RESTRICT pra users.
+  async removeAllOwnedBy(ownerId: string): Promise<void> {
+    await this.contactRepo.delete({ ownerId });
+  }
 }

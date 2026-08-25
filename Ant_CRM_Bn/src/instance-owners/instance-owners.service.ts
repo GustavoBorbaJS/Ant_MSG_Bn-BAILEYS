@@ -82,4 +82,13 @@ export class InstanceOwnersService {
       return ownerId === requester.id;
     });
   }
+
+  // Chamado quando um usuário é removido de vez (ver UsersService.remove) -
+  // instance_owners.ownerId tem FK ON DELETE RESTRICT pra users. Só libera a
+  // POSSE no CRM (a instância volta a ser "legada"/tratada como do admin,
+  // ver getEffectiveOwnerId) - não mexe na sessão WhatsApp em si no engine,
+  // ela continua conectada normalmente.
+  async releaseAllOwnedBy(ownerId: string): Promise<void> {
+    await this.ownerRepo.delete({ ownerId });
+  }
 }

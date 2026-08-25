@@ -8,6 +8,9 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { User } from '../database/entities/user.entity';
 import { CreateUserDto, UpdateUserDto } from './dto';
+import { CampaignsService } from '../campaigns/campaigns.service';
+import { ContactsService } from '../contacts/contacts.service';
+import { InstanceOwnersService } from '../instance-owners/instance-owners.service';
 
 function generatePassword(): string {
   // 12 caracteres legiveis, alfanumericos - facil de digitar/compartilhar
@@ -27,6 +30,9 @@ export class UsersService implements OnModuleInit {
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     private configService: ConfigService,
+    private campaignsService: CampaignsService,
+    private contactsService: ContactsService,
+    private instanceOwnersService: InstanceOwnersService,
   ) {}
 
   // Bootstrap: se ainda nao existe nenhum usuario no banco, cria o admin inicial
@@ -222,16 +228,27 @@ export class UsersService implements OnModuleInit {
       }
     }
 
+    // Remover um usuário apaga tudo que ele possui - campaigns/contacts/
+    // instance_owners têm FK ON DELETE RESTRICT pra users (ver migration
+    // AddOwnership), então precisa sumir com isso ANTES de apagar o dono,
+    // senão o Postgres barra o DELETE. "Instâncias" aqui é só a POSSE no CRM:
+    // a sessão WhatsApp em si no engine não é desconectada/resetada, ela
+    // volta a ser tratada como "legada"/do admin (ver
+    // InstanceOwnersService.getEffectiveOwnerId) - continua conectada normal.
+    await this.campaignsService.removeAllOwnedBy(id);
+    await this.contactsService.removeAllOwnedBy(id);
+    await this.instanceOwnersService.releaseAllOwnedBy(id);
+
     try {
       await this.userRepo.delete(id);
     } catch (err) {
-      // 23503 = foreign_key_violation (Postgres) - campaigns/contacts/
-      // instance_owners têm FK ON DELETE RESTRICT pra users (ver migration
-      // AddOwnership). Sem esse catch, tentar remover um usuário que ainda é
-      // dono de algo estourava como 500 genérico em vez de dizer o motivo.
+      // 23503 = foreign_key_violation (Postgres) - defesa em profundidade
+      // caso surja alguma outra FK pra users no futuro que a limpeza acima
+      // não cubra; sem isso viraria um 500 genérico em vez de uma mensagem
+      // clara.
       if (err.code === '23503') {
         throw new BadRequestException(
-          'Não é possível remover esse usuário: ele ainda é dono de campanhas, contatos ou instâncias. Transfira ou remova esses itens antes (ou bloqueie o usuário em vez de removê-lo).',
+          'Não é possível remover esse usuário: ainda existe algo vinculado a ele que não foi limpo automaticamente.',
         );
       }
       throw err;
