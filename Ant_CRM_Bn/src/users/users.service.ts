@@ -222,6 +222,19 @@ export class UsersService implements OnModuleInit {
       }
     }
 
-    await this.userRepo.delete(id);
+    try {
+      await this.userRepo.delete(id);
+    } catch (err) {
+      // 23503 = foreign_key_violation (Postgres) - campaigns/contacts/
+      // instance_owners têm FK ON DELETE RESTRICT pra users (ver migration
+      // AddOwnership). Sem esse catch, tentar remover um usuário que ainda é
+      // dono de algo estourava como 500 genérico em vez de dizer o motivo.
+      if (err.code === '23503') {
+        throw new BadRequestException(
+          'Não é possível remover esse usuário: ele ainda é dono de campanhas, contatos ou instâncias. Transfira ou remova esses itens antes (ou bloqueie o usuário em vez de removê-lo).',
+        );
+      }
+      throw err;
+    }
   }
 }
