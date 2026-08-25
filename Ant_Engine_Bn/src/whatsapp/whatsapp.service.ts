@@ -273,6 +273,80 @@ export class WhatsappService implements OnModuleDestroy {
     return sendPromise;
   }
 
+  // Modo AGRESSIVO do disparo de teste (Ant_CRM_Bn/src/test-dispatch) - abre
+  // uma SEGUNDA conexao Baileys concorrente na MESMA sessao (mesmas
+  // credenciais/authDir) enquanto a principal segue viva, de proposito. O
+  // WhatsApp trata isso como "mesmo dispositivo logando em outro lugar" e
+  // fecha uma das duas com DisconnectReason.connectionReplaced (conflito) -
+  // essa troca de dono da sessao no meio do caminho e o jeito mais
+  // determinístico que temos de reproduzir dessincronia de criptografia
+  // (o "não foi possível carregar a mensagem" do WhatsApp), mas é DESTRUTIVO:
+  // pode deixar a instância piscando desconectada/reconectando por um tempo,
+  // ou exigir reparear. Só deve ser chamado com a instância já conectada
+  // (senão não existe conflito nenhum pra forçar) e com o usuário ciente do
+  // risco (ver TestDispatchService.dispatch, que exige acknowledgeAggressiveRisk).
+  async forceSessionConflict(
+    instanceId: string,
+    to: string,
+    texts: string[],
+  ): Promise<{ status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[]> {
+    const primary = this.instances.get(instanceId);
+    if (!primary || primary.status !== 'connected') {
+      throw new InstanceNotConnectedError(`Instance ${instanceId} is not connected`);
+    }
+
+    const jid = await this.resolveJid(primary, to);
+
+    const sessionsDir = this.configService.get<string>('sessionsDir');
+    const authDir = path.join(sessionsDir, instanceId);
+    const { state: shadowState, saveCreds: shadowSaveCreds } = await useEncryptedMultiFileAuthState(authDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    const shadowSock = makeWASocket({
+      version,
+      auth: shadowState,
+      logger: pino({ level: this.configService.get<string>('logLevel') }) as any,
+      printQRInTerminal: false,
+      browser: ['Anti-Ban-Shadow', 'Chrome', '1.0.0'],
+    });
+    shadowSock.ev.on('creds.update', shadowSaveCreds);
+
+    this.logger.warn(
+      `[TESTE AGRESSIVO] Instância ${instanceId}: abrindo 2ª conexão concorrente na mesma sessão de propósito ` +
+        `(vai gerar conflito de dispositivo com a conexão principal).`,
+    );
+
+    // Espera a shadow abrir OU fechar (o conflito pode derrubar ELA em vez da
+    // principal, dependendo de qual o WhatsApp considera "mais nova") - teto
+    // curto de proposito: queremos mandar BEM na janela em que as duas
+    // coexistem, nao depois de tudo ja ter assentado de novo.
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      shadowSock.ev.on('connection.update', (update) => {
+        if (update.connection === 'open' || update.connection === 'close') finish();
+      });
+      setTimeout(finish, 4000);
+    });
+
+    const results: { status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[] = [];
+    for (const text of texts) {
+      try {
+        const result = await shadowSock.sendMessage(jid, { text });
+        results.push({ status: 'sent', messageId: result?.key?.id });
+      } catch (err) {
+        results.push({ status: 'failed', errorMessage: err.message });
+      }
+    }
+
+    shadowSock.end(undefined);
+    return results;
+  }
+
   async checkNumber(instanceId: string, to: string): Promise<{ exists: boolean; jid?: string }> {
     const instance = this.instances.get(instanceId);
     if (!instance || instance.status !== 'connected') {

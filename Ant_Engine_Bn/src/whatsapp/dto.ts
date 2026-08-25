@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsUrl, Length, Matches } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsOptional, IsString, IsUrl, Length, Matches } from 'class-validator';
 
 // instanceId vira nome de pasta em disco (sessao) e chave de rate limit no worker -
 // trava o formato pra evitar path traversal e afins.
@@ -60,4 +60,17 @@ export class ConnectDto {
   @IsString()
   @Matches(PHONE_NUMBER_PATTERN, { message: 'phoneNumber deve conter só dígitos (com DDI), sem +, espaços ou traços' })
   phoneNumber?: string;
+}
+
+export class ForceConflictDto {
+  @IsString()
+  @Length(1, 40)
+  to: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @Length(1, 4096, { each: true })
+  texts: string[];
 }

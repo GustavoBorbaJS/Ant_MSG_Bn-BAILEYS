@@ -64,4 +64,17 @@ export class EngineClientService {
     const response = await this.axios.post('/send', { instanceId, to, text, messageId });
     return response.data;
   }
+
+  // Modo AGRESSIVO do disparo de teste - ver TestDispatchService e
+  // Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts (forceSessionConflict).
+  // Abre uma 2ª conexão concorrente na mesma sessão de propósito, o que PODE
+  // derrubar/corromper a instância - só chamar com o usuário ciente do risco.
+  async forceSessionConflict(
+    instanceId: string,
+    to: string,
+    texts: string[],
+  ): Promise<{ results: { status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[] }> {
+    const response = await this.axios.post(`/instances/${instanceId}/force-session-conflict`, { to, texts });
+    return response.data;
+  }
 }

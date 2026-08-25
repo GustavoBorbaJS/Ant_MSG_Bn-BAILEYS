@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -30,4 +30,18 @@ export class TestDispatchDto {
   @Min(1)
   @Max(MAX_TEST_BURST_COUNT)
   burstCount?: number;
+
+  // Modo AGRESSIVO (ver TestDispatchService): abre uma 2ª conexão Baileys
+  // concorrente na mesma sessão de propósito, pra forçar um conflito de
+  // dispositivo - bem mais chance de reproduzir dessincronia de criptografia
+  // que o modo normal, mas PODE derrubar/corromper a instância. Exige
+  // acknowledgeAggressiveRisk=true junto (defesa em profundidade - a tela
+  // já faz o usuário confirmar antes de mandar).
+  @IsOptional()
+  @IsBoolean()
+  aggressive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  acknowledgeAggressiveRisk?: boolean;
 }

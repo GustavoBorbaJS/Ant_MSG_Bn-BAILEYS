@@ -10,6 +10,8 @@ export function TestDispatchPage() {
   const [to, setTo] = useState('');
   const [text, setText] = useState('');
   const [burstCount, setBurstCount] = useState(5);
+  const [aggressive, setAggressive] = useState(false);
+  const [acknowledgeAggressiveRisk, setAcknowledgeAggressiveRisk] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const { data: instances, isLoading: loadingInstances } = useQuery({
@@ -19,16 +21,20 @@ export function TestDispatchPage() {
 
   const dispatchMutation = useMutation({
     mutationFn: () =>
-      api.post<{ sentCount: number; burstCount: number }>('/test-dispatch', {
+      api.post<{ sentCount: number; burstCount: number; aggressive: boolean }>('/test-dispatch', {
         instanceId,
         to,
         text: text.trim() || undefined,
         burstCount,
+        aggressive,
+        acknowledgeAggressiveRisk: aggressive ? acknowledgeAggressiveRisk : undefined,
       }),
     onSuccess: (res) =>
       setResult({
         ok: true,
-        message: `${res.data.sentCount}/${res.data.burstCount} mensagens da rajada foram enviadas. Confira no celular do destinatário quais carregaram normalmente.`,
+        message: res.data.aggressive
+          ? `${res.data.sentCount}/${res.data.burstCount} mensagens enviadas durante o conflito de sessão forçado. Confira no celular do destinatário e o status da instância (pode ter caído/precisar reparear).`
+          : `${res.data.sentCount}/${res.data.burstCount} mensagens da rajada foram enviadas. Confira no celular do destinatário quais carregaram normalmente.`,
       }),
     onError: (err: any) =>
       setResult({ ok: false, message: err.response?.data?.message || 'Não foi possível completar o disparo de teste.' }),
@@ -107,6 +113,42 @@ export function TestDispatchPage() {
           className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         />
 
+        <label className="mb-4 flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={aggressive}
+            onChange={(e) => {
+              setAggressive(e.target.checked);
+              setAcknowledgeAggressiveRisk(false);
+            }}
+            className="mt-0.5"
+          />
+          <span>
+            Modo agressivo <span className="text-gray-400 dark:text-gray-500">(força conflito de sessão)</span>
+          </span>
+        </label>
+
+        {aggressive && (
+          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+            <p className="mb-2 font-medium">Isso é destrutivo.</p>
+            <p className="mb-3">
+              Abre uma segunda conexão concorrente na mesma sessão de propósito, forçando o WhatsApp a tratar como
+              "mesmo dispositivo logando em outro lugar". A instância precisa já estar <strong>conectada</strong> antes
+              de disparar - pode cair, ficar instável, ou exigir reparear depois. Só use numa instância de teste, não
+              numa em produção.
+            </p>
+            <label className="flex items-start gap-2 font-medium">
+              <input
+                type="checkbox"
+                checked={acknowledgeAggressiveRisk}
+                onChange={(e) => setAcknowledgeAggressiveRisk(e.target.checked)}
+                className="mt-0.5"
+              />
+              Confirmo que entendo o risco e aceito que a instância pode precisar reparear depois.
+            </label>
+          </div>
+        )}
+
         {result && (
           <p
             className={`mb-4 text-sm ${result.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
@@ -117,10 +159,12 @@ export function TestDispatchPage() {
 
         <button
           type="submit"
-          disabled={dispatchMutation.isPending || !instanceId}
-          className="w-full rounded-md bg-purple-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+          disabled={dispatchMutation.isPending || !instanceId || (aggressive && !acknowledgeAggressiveRisk)}
+          className={`w-full rounded-md py-2 text-sm font-medium text-white disabled:opacity-50 ${
+            aggressive ? 'bg-red-600' : 'bg-purple-600'
+          }`}
         >
-          {dispatchMutation.isPending ? 'Disparando...' : 'Disparar teste'}
+          {dispatchMutation.isPending ? 'Disparando...' : aggressive ? 'Disparar teste agressivo' : 'Disparar teste'}
         </button>
       </form>
     </div>
