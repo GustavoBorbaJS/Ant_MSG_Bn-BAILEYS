@@ -9,6 +9,7 @@ export function TestDispatchPage() {
   const [instanceId, setInstanceId] = useState('');
   const [to, setTo] = useState('');
   const [text, setText] = useState('');
+  const [burstCount, setBurstCount] = useState(5);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const { data: instances, isLoading: loadingInstances } = useQuery({
@@ -17,11 +18,17 @@ export function TestDispatchPage() {
   });
 
   const dispatchMutation = useMutation({
-    mutationFn: () => api.post('/test-dispatch', { instanceId, to, text: text.trim() || undefined }),
-    onSuccess: () =>
+    mutationFn: () =>
+      api.post<{ sentCount: number; burstCount: number }>('/test-dispatch', {
+        instanceId,
+        to,
+        text: text.trim() || undefined,
+        burstCount,
+      }),
+    onSuccess: (res) =>
       setResult({
         ok: true,
-        message: 'Mensagem de teste enviada. Confira no celular do destinatário se ela carregou normalmente.',
+        message: `${res.data.sentCount}/${res.data.burstCount} mensagens da rajada foram enviadas. Confira no celular do destinatário quais carregaram normalmente.`,
       }),
     onError: (err: any) =>
       setResult({ ok: false, message: err.response?.data?.message || 'Não foi possível completar o disparo de teste.' }),
@@ -46,9 +53,10 @@ export function TestDispatchPage() {
       </div>
 
       <div className="mb-5 rounded-lg border border-purple-200 bg-purple-50 p-3 text-sm text-purple-900 dark:border-purple-900/50 dark:bg-purple-900/20 dark:text-purple-300">
-        Isso reconecta a instância escolhida e envia a mensagem <strong>imediatamente</strong> em seguida, fora do
-        fluxo normal de disparo (sem fila, sem delay). É pra diagnosticar a instância - não use com contatos reais de
-        campanha.
+        Isso reconecta a instância escolhida e dispara a rajada de mensagens <strong>imediatamente</strong> em
+        seguida, fora do fluxo normal de disparo (sem fila, sem delay) - tenta reproduzir o "não foi possível
+        carregar a mensagem" do WhatsApp. Sem garantia de reprodução (é uma corrida de protocolo fora do nosso
+        controle). Use só pra estudo/diagnóstico, não com contatos reais de campanha.
       </div>
 
       <form onSubmit={handleSubmit} className="rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
@@ -84,6 +92,18 @@ export function TestDispatchPage() {
           onChange={(e) => setText(e.target.value)}
           rows={3}
           placeholder="Deixe em branco pra usar a mensagem de teste padrão"
+          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+        />
+
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+          Tamanho da rajada <span className="text-gray-400 dark:text-gray-500">(mensagens seguidas, 1-20)</span>
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={20}
+          value={burstCount}
+          onChange={(e) => setBurstCount(Math.min(20, Math.max(1, Number(e.target.value) || 1)))}
           className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         />
 
