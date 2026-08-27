@@ -351,11 +351,28 @@ export class WhatsappService implements OnModuleDestroy {
         `(vai forçar a principal a cair e reconectar sozinha).`,
     );
 
-    // 1.5s e o suficiente pro conflito derrubar a principal e ela comecar a
-    // reconectar sozinha (observado em producao: <1s) antes de fechar a
-    // shadow - sem essa espera a shadow poderia fechar antes do conflito
-    // sequer acontecer.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Fecha a shadow assim que ELA sinalizar que o conflito ja aconteceu
+    // (abriu ou fechou), em vez de esperar um tempo fixo - um teto fixo
+    // (ex: 1.5s) segura a shadow viva bem mais tempo do que o necessario,
+    // porque a principal reconecta em bem menos que isso (<300ms observado em
+    // producao). Nesse meio tempo a shadow ainda de pe gera um SEGUNDO
+    // conflito assim que a principal termina de reconectar - visto em
+    // producao: dois conflitos encadeados deixaram a conexao num estado
+    // degradado (upload de pre-key falhando em loop, erro interno do Baileys
+    // ao rodar as queries de init), bem pior que o "um conflito limpo" que
+    // esse teste quer isolar.
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      shadowSock.ev.on('connection.update', (update) => {
+        if (update.connection === 'open' || update.connection === 'close') finish();
+      });
+      setTimeout(finish, 4000);
+    });
     shadowSock.end(undefined);
 
     const deadline = Date.now() + 6000;
