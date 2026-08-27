@@ -30,6 +30,14 @@ export class WhatsappService implements OnModuleDestroy {
   // acabar indo com sucesso segundos depois, a mensagem seria enviada 2x.
   private readonly recentSends = new Map<string, Promise<{ messageId: string }>>();
   private static readonly SEND_DEDUP_TTL_MS = 2 * 60_000;
+  // Contador de tentativas de reconexao automatica ENQUANTO o pareamento
+  // ainda nao completou (ver openConnection) - permite um numero limitado de
+  // retries pra sobreviver a uma queda cedo/transitoria do handshake (comum
+  // na 1a tentativa contra os servidores do WhatsApp), sem reintroduzir o
+  // loop infinito que motivou parar de reconectar sozinho nesse caso.
+  private readonly pairingRetries = new Map<string, { count: number; windowStart: number }>();
+  private static readonly MAX_PAIRING_RETRIES = 3;
+  private static readonly PAIRING_RETRY_WINDOW_MS = 45_000;
 
   constructor(private configService: ConfigService) {}
 
@@ -96,6 +104,7 @@ export class WhatsappService implements OnModuleDestroy {
         record.status = 'connected';
         record.qr = undefined;
         record.pairingCode = undefined;
+        this.pairingRetries.delete(instanceId);
         this.logger.log(`Instância ${instanceId}: conectada`);
       }
 
@@ -119,6 +128,7 @@ export class WhatsappService implements OnModuleDestroy {
 
         if (loggedOut) {
           this.instances.delete(instanceId);
+          this.pairingRetries.delete(instanceId);
           // WhatsApp invalidou a sessão do lado deles (401) - sem isso, a
           // proxima tentativa de conectar carregava a MESMA sessão morta do
           // disco e falhava de novo, em loop, sem nunca gerar QR novo pra
@@ -135,13 +145,35 @@ export class WhatsappService implements OnModuleDestroy {
             this.logger.error(`Falha ao reconectar ${instanceId}: ${err.message}`),
           );
         } else {
-          // fechou sem nunca ter conectado de verdade (QR gerado mas ninguem
-          // escaneou a tempo, handshake falhou, etc) - NAO fica tentando de
-          // novo sozinho pra sempre (gerava um loop infinito de QR novo a
-          // cada ~9s, visto em producao). So marca desconectado e espera o
-          // usuario clicar em "Parear"/"Ver QR" de novo quando estiver pronto.
-          this.instances.delete(instanceId);
-          this.logger.warn(`Instância ${instanceId}: pareamento não concluído, aguardando nova tentativa manual`);
+          // fechou sem nunca ter conectado de verdade (QR/codigo gerado mas
+          // ninguem pareou a tempo, OU o handshake caiu cedo/transitoriamente
+          // antes disso - o 2o caso e comum na 1a tentativa contra os
+          // servidores do WhatsApp e merece um retry curto). Da ate
+          // MAX_PAIRING_RETRIES tentativas automaticas dentro de uma janela
+          // curta antes de desistir - sem esse limite, volta o loop infinito
+          // de QR novo a cada ~9s que motivou parar de reconectar sozinho
+          // aqui (ver commit anterior).
+          const now = Date.now();
+          const tracker = this.pairingRetries.get(instanceId);
+          const withinWindow = !!tracker && now - tracker.windowStart < WhatsappService.PAIRING_RETRY_WINDOW_MS;
+          const attempt = withinWindow ? tracker!.count + 1 : 1;
+          this.pairingRetries.set(instanceId, { count: attempt, windowStart: withinWindow ? tracker!.windowStart : now });
+
+          if (attempt <= WhatsappService.MAX_PAIRING_RETRIES) {
+            this.logger.warn(
+              `Instância ${instanceId}: conexão fechada antes do pareamento concluir (tentativa ${attempt}/${WhatsappService.MAX_PAIRING_RETRIES}), tentando de novo automaticamente`,
+            );
+            this.instances.delete(instanceId);
+            this.connectInstance(instanceId, phoneNumber).catch((err) =>
+              this.logger.error(`Falha ao retentar pareamento de ${instanceId}: ${err.message}`),
+            );
+          } else {
+            this.instances.delete(instanceId);
+            this.pairingRetries.delete(instanceId);
+            this.logger.warn(
+              `Instância ${instanceId}: pareamento não concluído após ${attempt} tentativas, aguardando nova tentativa manual`,
+            );
+          }
         }
       }
     });
