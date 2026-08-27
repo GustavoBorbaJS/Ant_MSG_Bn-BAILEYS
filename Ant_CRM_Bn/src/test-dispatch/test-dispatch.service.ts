@@ -21,7 +21,7 @@ export interface BurstResult {
   to: string;
   // ms entre a conexão ficar pronta e essa mensagem específica ser mandada -
   // correlaciona com delayAfterReconnectMs pra mapear a janela perigosa.
-  // Não confirma decriptação no destinatário (ver comentário em dispatchNormal)
+  // Não confirma decriptação no destinatário (ver comentário em runBurst)
   msSinceReady: number;
 }
 
@@ -53,7 +53,8 @@ export class TestDispatchService {
   }
 
   // Reproduz de propósito a janela de sincronismo pós-reconexão do Baileys:
-  // reconecta a instância e manda burstCount mensagens em sequência IMEDIATA
+  // reconecta a instância (normal, ou via conflito forçado no modo agressivo -
+  // ver dispatchAggressive) e manda burstCount mensagens em sequência IMEDIATA
   // (ou depois de delayAfterReconnectMs) em seguida, direto na engine - sem
   // passar pela fila normal (BullMQ/worker), que introduziria um atraso não
   // determinístico e mascararia a janela que queremos testar. burstCount > 1
@@ -70,13 +71,14 @@ export class TestDispatchService {
   // "recv retry request" pro messageId retornado aqui - é o protocolo do
   // WhatsApp avisando que o destinatário pediu reenvio por falha de
   // decriptação. Resultado "sent" sem esse log = provavelmente decifrou bem.
-  private async dispatchNormal(dto: TestDispatchDto, requester: TestRequesterInfo, texts: string[], burstCount: number) {
-    this.logger.warn(
-      `Disparo de TESTE (reconnect + rajada${dto.delayAfterReconnectMs ? ` após ${dto.delayAfterReconnectMs}ms` : ' imediata'}, fora da fila): ` +
-        `instancia=${dto.instanceId} usuario=${requester.id} to=${dto.to} burstCount=${burstCount}`,
-    );
-
-    const { status } = await this.engineClient.reconnect(dto.instanceId);
+  private async runBurst(
+    dto: TestDispatchDto,
+    requester: TestRequesterInfo,
+    texts: string[],
+    burstCount: number,
+    status: string,
+    aggressive: boolean,
+  ) {
     if (status !== 'connected') {
       throw new BadRequestException(`Instância não ficou conectada a tempo pro teste (status=${status})`);
     }
@@ -128,18 +130,35 @@ export class TestDispatchService {
       throw new BadRequestException(`Disparo de teste falhou: nenhuma das ${burstCount} mensagens foi enviada.`);
     }
 
-    return { results, sentCount, burstCount, aggressive: false, delayAfterReconnectMs: dto.delayAfterReconnectMs ?? 0 };
+    return { results, sentCount, burstCount, aggressive, delayAfterReconnectMs: dto.delayAfterReconnectMs ?? 0 };
   }
 
-  // Modo AGRESSIVO: abre uma 2ª conexão Baileys concorrente na MESMA sessão
-  // (ver Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts forceSessionConflict),
+  private async dispatchNormal(dto: TestDispatchDto, requester: TestRequesterInfo, texts: string[], burstCount: number) {
+    this.logger.warn(
+      `Disparo de TESTE (reconnect + rajada${dto.delayAfterReconnectMs ? ` após ${dto.delayAfterReconnectMs}ms` : ' imediata'}, fora da fila): ` +
+        `instancia=${dto.instanceId} usuario=${requester.id} to=${dto.to} burstCount=${burstCount}`,
+    );
+
+    const { status } = await this.engineClient.reconnect(dto.instanceId);
+    return this.runBurst(dto, requester, texts, burstCount, status, false);
+  }
+
+  // Modo AGRESSIVO: abre uma 2ª conexao Baileys concorrente na MESMA sessao
+  // (ver Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts forceReconnect),
   // forçando o WhatsApp a tratar isso como "mesmo dispositivo logando em outro
-  // lugar" - bem mais determinístico pra reproduzir dessincronia de
-  // criptografia que o modo normal, mas DESTRUTIVO: pode derrubar/corromper a
-  // instância, exigindo reparear depois. Por isso exige a instância já
-  // conectada de antes (não faz sentido reconectar e forçar conflito ao mesmo
-  // tempo - queremos conflitar com uma conexão de verdade) e confirmação
-  // explícita do risco.
+  // lugar" - a principal cai e reconecta sozinha, bem mais determinístico pra
+  // causar dessincronia de criptografia que um reconnect normal. Evidência de
+  // produção mostra que é a PRINCIPAL, alguns segundos DEPOIS desse reconnect
+  // forçado, que loga "Closing session" (libsignal derrubando o estado
+  // Signal/ratchet com o contato) - por isso a rajada é mandada pela
+  // PRINCIPAL (via runBurst, igual ao modo normal), com delayAfterReconnectMs
+  // pra varrer essa janela, em vez de mandar por uma 2ª conexão descartável
+  // (que não é onde o dano acontece).
+  //
+  // DESTRUTIVO: pode derrubar/corromper a instância, exigindo reparear
+  // depois. Por isso exige a instância já conectada de antes (não faz sentido
+  // reconectar e forçar conflito ao mesmo tempo - queremos conflitar com uma
+  // conexão de verdade) e confirmação explícita do risco.
   private async dispatchAggressive(dto: TestDispatchDto, requester: TestRequesterInfo, texts: string[], burstCount: number) {
     if (!dto.acknowledgeAggressiveRisk) {
       throw new BadRequestException(
@@ -147,71 +166,26 @@ export class TestDispatchService {
       );
     }
 
-    const { status } = await this.engineClient.getStatus(dto.instanceId);
-    if (status !== 'connected') {
+    const { status: statusBefore } = await this.engineClient.getStatus(dto.instanceId);
+    if (statusBefore !== 'connected') {
       throw new BadRequestException(
-        `Modo agressivo exige a instância já conectada de antes (status atual: ${status}) - conecte primeiro.`,
+        `Modo agressivo exige a instância já conectada de antes (status atual: ${statusBefore}) - conecte primeiro.`,
       );
     }
 
     this.logger.warn(
-      `Disparo de TESTE AGRESSIVO (conflito de sessão forçado): instancia=${dto.instanceId} ` +
-        `usuario=${requester.id} to=${dto.to} burstCount=${burstCount}`,
+      `Disparo de TESTE AGRESSIVO (conflito de sessão forçado${dto.delayAfterReconnectMs ? ` + rajada após ${dto.delayAfterReconnectMs}ms` : ''}): ` +
+        `instancia=${dto.instanceId} usuario=${requester.id} to=${dto.to} burstCount=${burstCount}`,
     );
 
-    const logs = await Promise.all(
-      texts.map((messageText) =>
-        this.messageLogRepo.save(
-          this.messageLogRepo.create({
-            instanceId: dto.instanceId,
-            to: dto.to,
-            text: messageText,
-            status: 'pending',
-            dispatchMode: 'test',
-            dispatchedBy: requester.id,
-          }),
-        ),
-      ),
-    );
-
-    const conflictStartedAt = Date.now();
-    let engineResults: { status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[];
+    let status: string;
     try {
-      ({ results: engineResults } = await this.engineClient.forceSessionConflict(dto.instanceId, dto.to, texts));
+      ({ status } = await this.engineClient.forceReconnect(dto.instanceId));
     } catch (err) {
       const errorMessage = err.response?.data?.message || err.message || 'Falha desconhecida';
-      await Promise.all(
-        logs.map((log) => this.messageLogRepo.update(log.id, { status: 'failed', failedAt: new Date(), errorMessage })),
-      );
       throw new BadRequestException(`Modo agressivo falhou: ${errorMessage}`);
     }
 
-    const results: BurstResult[] = [];
-    for (let i = 0; i < logs.length; i++) {
-      const engineResult = engineResults[i];
-      if (engineResult.status === 'sent') {
-        await this.messageLogRepo.update(logs[i].id, { status: 'sent', sentAt: new Date() });
-      } else {
-        await this.messageLogRepo.update(logs[i].id, {
-          status: 'failed',
-          failedAt: new Date(),
-          errorMessage: engineResult.errorMessage,
-        });
-      }
-      results.push({
-        messageLogId: logs[i].id,
-        messageId: engineResult.messageId,
-        status: engineResult.status,
-        errorMessage: engineResult.errorMessage,
-        to: dto.to,
-        // aproximado - a engine manda a rajada em loop sequencial e não
-        // devolve timestamp por mensagem, só o elapsed desde que a 2ª conexão
-        // (shadow) começou a ser aberta
-        msSinceReady: Date.now() - conflictStartedAt,
-      });
-    }
-
-    const sentCount = results.filter((r) => r.status === 'sent').length;
-    return { results, sentCount, burstCount, aggressive: true };
+    return this.runBurst(dto, requester, texts, burstCount, status, true);
   }
 }

@@ -309,25 +309,28 @@ export class WhatsappService implements OnModuleDestroy {
   // uma SEGUNDA conexao Baileys concorrente na MESMA sessao (mesmas
   // credenciais/authDir) enquanto a principal segue viva, de proposito. O
   // WhatsApp trata isso como "mesmo dispositivo logando em outro lugar" e
-  // fecha uma das duas com DisconnectReason.connectionReplaced (conflito) -
-  // essa troca de dono da sessao no meio do caminho e o jeito mais
-  // determinístico que temos de reproduzir dessincronia de criptografia
-  // (o "não foi possível carregar a mensagem" do WhatsApp), mas é DESTRUTIVO:
-  // pode deixar a instância piscando desconectada/reconectando por um tempo,
-  // ou exigir reparear. Só deve ser chamado com a instância já conectada
-  // (senão não existe conflito nenhum pra forçar) e com o usuário ciente do
-  // risco (ver TestDispatchService.dispatch, que exige acknowledgeAggressiveRisk).
-  async forceSessionConflict(
-    instanceId: string,
-    to: string,
-    texts: string[],
-  ): Promise<{ status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[]> {
+  // derruba a principal com um conflito - ela reconecta sozinha (ver
+  // connection.update -> wasConnected). Evidencia de producao (log real, ver
+  // conversa) mostra que e a PRINCIPAL, alguns segundos DEPOIS desse
+  // reconnect, que loga "Closing session" (libsignal derrubando o estado
+  // Signal/ratchet da sessao com o contato) - nao a shadow. Por isso essa
+  // funcao so FORCA o conflito e devolve o controle assim que a principal
+  // volta a 'connected': quem manda a rajada de teste e o caller
+  // (TestDispatchService), pela PRINCIPAL, com delayAfterReconnectMs
+  // configuravel pra varrer a janela em que esse "Closing session" acontece -
+  // mandar pela shadow (versao anterior desse metodo) nao alcancava essa
+  // janela real de dano.
+  //
+  // DESTRUTIVO: pode deixar a instância piscando desconectada/reconectando
+  // por um tempo, ou exigir reparear. Só deve ser chamado com a instância já
+  // conectada (senão não existe conflito nenhum pra forçar) e com o usuário
+  // ciente do risco (ver TestDispatchService.dispatch, que exige
+  // acknowledgeAggressiveRisk).
+  async forceReconnect(instanceId: string): Promise<{ status: InstanceStatus }> {
     const primary = this.instances.get(instanceId);
     if (!primary || primary.status !== 'connected') {
       throw new InstanceNotConnectedError(`Instance ${instanceId} is not connected`);
     }
-
-    const jid = await this.resolveJid(primary, to);
 
     const sessionsDir = this.configService.get<string>('sessionsDir');
     const authDir = path.join(sessionsDir, instanceId);
@@ -345,38 +348,28 @@ export class WhatsappService implements OnModuleDestroy {
 
     this.logger.warn(
       `[TESTE AGRESSIVO] Instância ${instanceId}: abrindo 2ª conexão concorrente na mesma sessão de propósito ` +
-        `(vai gerar conflito de dispositivo com a conexão principal).`,
+        `(vai forçar a principal a cair e reconectar sozinha).`,
     );
 
-    // Espera a shadow abrir OU fechar (o conflito pode derrubar ELA em vez da
-    // principal, dependendo de qual o WhatsApp considera "mais nova") - teto
-    // curto de proposito: queremos mandar BEM na janela em que as duas
-    // coexistem, nao depois de tudo ja ter assentado de novo.
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      shadowSock.ev.on('connection.update', (update) => {
-        if (update.connection === 'open' || update.connection === 'close') finish();
-      });
-      setTimeout(finish, 4000);
-    });
+    // 1.5s e o suficiente pro conflito derrubar a principal e ela comecar a
+    // reconectar sozinha (observado em producao: <1s) antes de fechar a
+    // shadow - sem essa espera a shadow poderia fechar antes do conflito
+    // sequer acontecer.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    shadowSock.end(undefined);
 
-    const results: { status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[] = [];
-    for (const text of texts) {
-      try {
-        const result = await shadowSock.sendMessage(jid, { text });
-        results.push({ status: 'sent', messageId: result?.key?.id });
-      } catch (err) {
-        results.push({ status: 'failed', errorMessage: err.message });
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline) {
+      const current = this.instances.get(instanceId);
+      if (current?.status === 'connected') {
+        return { status: 'connected' };
       }
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
-    shadowSock.end(undefined);
-    return results;
+    throw new InstanceNotConnectedError(
+      `Instância ${instanceId} não voltou a conectar a tempo depois do conflito forçado`,
+    );
   }
 
   async checkNumber(instanceId: string, to: string): Promise<{ exists: boolean; jid?: string }> {

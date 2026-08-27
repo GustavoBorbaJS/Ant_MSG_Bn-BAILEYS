@@ -51,8 +51,8 @@ export function TestDispatchPage() {
         burstCount,
         aggressive,
         acknowledgeAggressiveRisk: aggressive ? acknowledgeAggressiveRisk : undefined,
-        delayAfterReconnectMs: !aggressive && delayAfterReconnectMs > 0 ? delayAfterReconnectMs : undefined,
-        additionalRecipients: !aggressive && recipients.length > 0 ? recipients : undefined,
+        delayAfterReconnectMs: delayAfterReconnectMs > 0 ? delayAfterReconnectMs : undefined,
+        additionalRecipients: recipients.length > 0 ? recipients : undefined,
       });
     },
     onSuccess: (res) =>
@@ -145,37 +145,36 @@ export function TestDispatchPage() {
           className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         />
 
-        {!aggressive && (
-          <>
-            <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
-              Atraso após reconectar{' '}
-              <span className="text-gray-400 dark:text-gray-500">(ms, 0 = imediato - varra 0/500/1000/2000 pra mapear a janela)</span>
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={30000}
-              step={100}
-              value={delayAfterReconnectMs}
-              onChange={(e) => setDelayAfterReconnectMs(Math.max(0, Number(e.target.value) || 0))}
-              className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-            />
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+          Atraso após reconectar{' '}
+          <span className="text-gray-400 dark:text-gray-500">
+            (ms, 0 = imediato - varra 0/500/1000/2000/3000/4000 pra mapear a janela
+            {aggressive ? ' - no modo agressivo, esse atraso conta a partir do reconnect forçado pelo conflito' : ''})
+          </span>
+        </label>
+        <input
+          type="number"
+          min={0}
+          max={30000}
+          step={100}
+          value={delayAfterReconnectMs}
+          onChange={(e) => setDelayAfterReconnectMs(Math.max(0, Number(e.target.value) || 0))}
+          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+        />
 
-            <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
-              Destinatários extras pra rajada{' '}
-              <span className="text-gray-400 dark:text-gray-500">
-                (opcional, um por linha ou vírgula - alterna entre eles em vez de repetir sempre o número acima)
-              </span>
-            </label>
-            <textarea
-              value={additionalRecipients}
-              onChange={(e) => setAdditionalRecipients(e.target.value)}
-              rows={2}
-              placeholder="ex: 5511999999999, 5511888888888"
-              className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-            />
-          </>
-        )}
+        <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+          Destinatários extras pra rajada{' '}
+          <span className="text-gray-400 dark:text-gray-500">
+            (opcional, um por linha ou vírgula - alterna entre eles em vez de repetir sempre o número acima)
+          </span>
+        </label>
+        <textarea
+          value={additionalRecipients}
+          onChange={(e) => setAdditionalRecipients(e.target.value)}
+          rows={2}
+          placeholder="ex: 5511999999999, 5511888888888"
+          className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+        />
 
         <label className="mb-4 flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
           <input
@@ -197,9 +196,11 @@ export function TestDispatchPage() {
             <p className="mb-2 font-medium">Isso é destrutivo.</p>
             <p className="mb-3">
               Abre uma segunda conexão concorrente na mesma sessão de propósito, forçando o WhatsApp a tratar como
-              "mesmo dispositivo logando em outro lugar". A instância precisa já estar <strong>conectada</strong> antes
-              de disparar - pode cair, ficar instável, ou exigir reparear depois. Só use numa instância de teste, não
-              numa em produção.
+              "mesmo dispositivo logando em outro lugar" - a instância principal cai e reconecta sozinha. A rajada é
+              mandada pela <strong>própria instância</strong> depois desse reconnect forçado (respeitando o atraso
+              configurado acima), não pela conexão descartável - é onde o log real mostrou o dano acontecendo. A
+              instância precisa já estar <strong>conectada</strong> antes de disparar - pode cair, ficar instável, ou
+              exigir reparear depois. Só use numa instância de teste, não numa em produção.
             </p>
             <label className="flex items-start gap-2 font-medium">
               <input

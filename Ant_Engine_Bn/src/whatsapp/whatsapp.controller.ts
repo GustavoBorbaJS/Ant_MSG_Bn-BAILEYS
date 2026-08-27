@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { MetaCloudService } from '../meta-cloud/meta-cloud.service';
-import { ConnectDto, ForceConflictDto, InstanceIdDto, SendDto } from './dto';
+import { ConnectDto, InstanceIdDto, SendDto } from './dto';
 import { InstanceNotConnectedError, InvalidRecipientError } from './errors';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -107,25 +107,23 @@ export class WhatsappController {
     return this.whatsappService.listInstances();
   }
 
-  // Modo AGRESSIVO do disparo de teste (ver WhatsappService.forceSessionConflict) -
-  // abre uma 2ª conexão concorrente na mesma sessão de propósito, pra tentar
-  // reproduzir dessincronia de criptografia de forma mais determinística que
-  // só reconectar+mandar rápido. DESTRUTIVO: não existe pra instância Meta
-  // Cloud API (não tem sessão local pra conflitar).
-  @Post('instances/:instanceId/force-session-conflict')
+  // Modo AGRESSIVO do disparo de teste (ver WhatsappService.forceReconnect) -
+  // abre uma 2ª conexão concorrente na mesma sessão de propósito pra forçar a
+  // principal a cair e reconectar sozinha, de forma mais determinística que
+  // só reconectar normal. Quem manda a rajada de teste é o caller
+  // (TestDispatchService), via /send normal, depois que isso resolver.
+  // DESTRUTIVO: não existe pra instância Meta Cloud API (não tem sessão local
+  // pra conflitar).
+  @Post('instances/:instanceId/force-reconnect')
   @HttpCode(200)
-  async forceSessionConflict(@Param('instanceId') instanceId: string, @Body() body: ForceConflictDto) {
+  async forceReconnect(@Param('instanceId') instanceId: string) {
     assertValidInstanceId(instanceId);
     if (this.metaCloudService.hasInstance(instanceId)) {
       throw new BadRequestException('Modo agressivo não se aplica a instâncias Meta Cloud API (não têm sessão local).');
     }
     try {
-      const results = await this.whatsappService.forceSessionConflict(instanceId, body.to, body.texts);
-      return { results };
+      return await this.whatsappService.forceReconnect(instanceId);
     } catch (err) {
-      if (err instanceof InvalidRecipientError) {
-        throw new HttpException(err.message, HttpStatus.BAD_REQUEST);
-      }
       if (err instanceof InstanceNotConnectedError) {
         throw new HttpException(err.message, HttpStatus.CONFLICT);
       }

@@ -66,15 +66,14 @@ export class EngineClientService {
   }
 
   // Modo AGRESSIVO do disparo de teste - ver TestDispatchService e
-  // Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts (forceSessionConflict).
-  // Abre uma 2ª conexão concorrente na mesma sessão de propósito, o que PODE
-  // derrubar/corromper a instância - só chamar com o usuário ciente do risco.
-  async forceSessionConflict(
-    instanceId: string,
-    to: string,
-    texts: string[],
-  ): Promise<{ results: { status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[] }> {
-    const response = await this.axios.post(`/instances/${instanceId}/force-session-conflict`, { to, texts });
+  // Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts (forceReconnect). Abre uma
+  // 2ª conexão concorrente na mesma sessão de propósito pra forçar a
+  // principal a cair e reconectar sozinha (o que PODE derrubar/corromper a
+  // instância - só chamar com o usuário ciente do risco), e devolve o
+  // controle assim que ela volta a 'connected'. Quem manda a rajada de teste
+  // é o caller, via send() normal, com o delay que quiser depois disso.
+  async forceReconnect(instanceId: string): Promise<{ status: string }> {
+    const response = await this.axios.post(`/instances/${instanceId}/force-reconnect`);
     return response.data;
   }
 }
