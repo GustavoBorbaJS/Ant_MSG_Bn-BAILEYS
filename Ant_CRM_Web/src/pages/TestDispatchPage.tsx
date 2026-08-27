@@ -5,14 +5,33 @@ import { api } from '../lib/api';
 import type { InstanceSummary } from '../lib/api';
 import { TestTubeIcon } from '../components/icons';
 
+interface BurstResult {
+  messageLogId: string;
+  messageId?: string;
+  status: 'sent' | 'failed';
+  errorMessage?: string;
+  to: string;
+  msSinceReady: number;
+}
+
+interface DispatchResponse {
+  results: BurstResult[];
+  sentCount: number;
+  burstCount: number;
+  aggressive: boolean;
+  delayAfterReconnectMs?: number;
+}
+
 export function TestDispatchPage() {
   const [instanceId, setInstanceId] = useState('');
   const [to, setTo] = useState('');
   const [text, setText] = useState('');
   const [burstCount, setBurstCount] = useState(5);
+  const [delayAfterReconnectMs, setDelayAfterReconnectMs] = useState(0);
+  const [additionalRecipients, setAdditionalRecipients] = useState('');
   const [aggressive, setAggressive] = useState(false);
   const [acknowledgeAggressiveRisk, setAcknowledgeAggressiveRisk] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string; response?: DispatchResponse } | null>(null);
 
   const { data: instances, isLoading: loadingInstances } = useQuery({
     queryKey: ['instances'],
@@ -20,21 +39,29 @@ export function TestDispatchPage() {
   });
 
   const dispatchMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ sentCount: number; burstCount: number; aggressive: boolean }>('/test-dispatch', {
+    mutationFn: () => {
+      const recipients = additionalRecipients
+        .split(/[\n,]/)
+        .map((r) => r.trim())
+        .filter(Boolean);
+      return api.post<DispatchResponse>('/test-dispatch', {
         instanceId,
         to,
         text: text.trim() || undefined,
         burstCount,
         aggressive,
         acknowledgeAggressiveRisk: aggressive ? acknowledgeAggressiveRisk : undefined,
-      }),
+        delayAfterReconnectMs: !aggressive && delayAfterReconnectMs > 0 ? delayAfterReconnectMs : undefined,
+        additionalRecipients: !aggressive && recipients.length > 0 ? recipients : undefined,
+      });
+    },
     onSuccess: (res) =>
       setResult({
         ok: true,
         message: res.data.aggressive
           ? `${res.data.sentCount}/${res.data.burstCount} mensagens enviadas durante o conflito de sessão forçado. Confira no celular do destinatário e o status da instância (pode ter caído/precisar reparear).`
-          : `${res.data.sentCount}/${res.data.burstCount} mensagens da rajada foram enviadas. Confira no celular do destinatário quais carregaram normalmente.`,
+          : `${res.data.sentCount}/${res.data.burstCount} mensagens da rajada foram enviadas. Pra confirmar de verdade se algum destinatário falhou ao decifrar, olhe o log do engine (LOG_LEVEL=debug) procurando "recv retry request" pelos messageId abaixo - não dá pra confiar só no que "sent" significa aqui.`,
+        response: res.data,
       }),
     onError: (err: any) =>
       setResult({ ok: false, message: err.response?.data?.message || 'Não foi possível completar o disparo de teste.' }),
@@ -59,10 +86,15 @@ export function TestDispatchPage() {
       </div>
 
       <div className="mb-5 rounded-lg border border-purple-200 bg-purple-50 p-3 text-sm text-purple-900 dark:border-purple-900/50 dark:bg-purple-900/20 dark:text-purple-300">
-        Isso reconecta a instância escolhida e dispara a rajada de mensagens <strong>imediatamente</strong> em
-        seguida, fora do fluxo normal de disparo (sem fila, sem delay) - tenta reproduzir o "não foi possível
-        carregar a mensagem" do WhatsApp. Sem garantia de reprodução (é uma corrida de protocolo fora do nosso
-        controle). Use só pra estudo/diagnóstico, não com contatos reais de campanha.
+        Isso reconecta a instância escolhida e dispara a rajada de mensagens (imediatamente, ou depois do atraso
+        configurado) fora do fluxo normal de disparo (sem fila) - tenta reproduzir o "não foi possível carregar a
+        mensagem" do WhatsApp. Sem garantia de reprodução (é uma corrida de protocolo fora do nosso controle). Use
+        só pra estudo/diagnóstico, não com contatos reais de campanha.
+        <br />
+        <strong>Confirmação de verdade:</strong> "enviada" aqui só significa que o WhatsApp aceitou a mensagem - não
+        que o destinatário conseguiu decifrar. Pra confirmar, suba o <code>LOG_LEVEL</code> do engine pra{' '}
+        <code>debug</code> e procure <code>"recv retry request"</code> no log - é o próprio WhatsApp avisando que o
+        destinatário pediu reenvio por falha de decriptação.
       </div>
 
       <form onSubmit={handleSubmit} className="rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
@@ -113,6 +145,38 @@ export function TestDispatchPage() {
           className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         />
 
+        {!aggressive && (
+          <>
+            <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+              Atraso após reconectar{' '}
+              <span className="text-gray-400 dark:text-gray-500">(ms, 0 = imediato - varra 0/500/1000/2000 pra mapear a janela)</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={30000}
+              step={100}
+              value={delayAfterReconnectMs}
+              onChange={(e) => setDelayAfterReconnectMs(Math.max(0, Number(e.target.value) || 0))}
+              className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            />
+
+            <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">
+              Destinatários extras pra rajada{' '}
+              <span className="text-gray-400 dark:text-gray-500">
+                (opcional, um por linha ou vírgula - alterna entre eles em vez de repetir sempre o número acima)
+              </span>
+            </label>
+            <textarea
+              value={additionalRecipients}
+              onChange={(e) => setAdditionalRecipients(e.target.value)}
+              rows={2}
+              placeholder="ex: 5511999999999, 5511888888888"
+              className="mb-4 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            />
+          </>
+        )}
+
         <label className="mb-4 flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
           <input
             type="checkbox"
@@ -150,11 +214,39 @@ export function TestDispatchPage() {
         )}
 
         {result && (
-          <p
-            className={`mb-4 text-sm ${result.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
-          >
-            {result.message}
-          </p>
+          <div className="mb-4">
+            <p className={`text-sm ${result.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+              {result.message}
+            </p>
+            {result.response && (
+              <div className="mt-2 overflow-x-auto rounded-md border border-gray-200 dark:border-gray-700">
+                <table className="w-full min-w-[420px] text-xs">
+                  <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
+                    <tr>
+                      <th className="px-2 py-1">Para</th>
+                      <th className="px-2 py-1">ms desde pronto</th>
+                      <th className="px-2 py-1">Status</th>
+                      <th className="px-2 py-1">messageId</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.response.results.map((r, i) => (
+                      <tr key={i} className="border-t border-gray-100 dark:border-gray-800">
+                        <td className="px-2 py-1 font-mono">{r.to}</td>
+                        <td className="px-2 py-1">{r.msSinceReady}ms</td>
+                        <td className={`px-2 py-1 ${r.status === 'sent' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {r.status}
+                        </td>
+                        <td className="px-2 py-1 font-mono text-gray-400 dark:text-gray-500" title={r.errorMessage}>
+                          {r.messageId ?? r.errorMessage ?? '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         )}
 
         <button

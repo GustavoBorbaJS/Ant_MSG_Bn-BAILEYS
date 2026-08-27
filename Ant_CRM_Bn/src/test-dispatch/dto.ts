@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -44,4 +44,26 @@ export class TestDispatchDto {
   @IsOptional()
   @IsBoolean()
   acknowledgeAggressiveRisk?: boolean;
+
+  // Espera X ms depois do reconnect (modo normal) antes de começar a rajada -
+  // varre a duração da janela perigosa pós-reconexão em vez de só testar
+  // "imediato". Ex: rodar a mesma rajada com 0, 500, 1000, 2000ms e comparar
+  // onde as falhas de decriptação (ver LOG_LEVEL=debug no engine, procurar
+  // "recv retry request") param de acontecer.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30_000)
+  delayAfterReconnectMs?: number;
+
+  // Destinatários extras pra rajada (modo normal) - se presente, cada
+  // mensagem vai pra um destinatário diferente (round-robin) em vez de
+  // sempre pro mesmo "to". Ajuda a distinguir se o problema é da CONEXÃO
+  // (afeta qualquer destinatário igual) ou da SESSÃO POR CONTATO (só quem
+  // não tem sessão "quente" recente falha).
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_TEST_BURST_COUNT)
+  @IsString({ each: true })
+  additionalRecipients?: string[];
 }

@@ -18,6 +18,11 @@ export interface BurstResult {
   messageId?: string;
   status: 'sent' | 'failed';
   errorMessage?: string;
+  to: string;
+  // ms entre a conexão ficar pronta e essa mensagem específica ser mandada -
+  // correlaciona com delayAfterReconnectMs pra mapear a janela perigosa.
+  // Não confirma decriptação no destinatário (ver comentário em dispatchNormal)
+  msSinceReady: number;
 }
 
 @Injectable()
@@ -49,16 +54,26 @@ export class TestDispatchService {
 
   // Reproduz de propósito a janela de sincronismo pós-reconexão do Baileys:
   // reconecta a instância e manda burstCount mensagens em sequência IMEDIATA
-  // em seguida, direto na engine - sem passar pela fila normal (BullMQ/worker),
-  // que introduziria um atraso não determinístico e mascararia a janela que
-  // queremos testar. burstCount > 1 é de propósito: o caso real que originou
-  // isso mostrou VÁRIAS mensagens seguidas falhando pro mesmo contato. Sem
-  // garantia de reprodução - é uma corrida de protocolo fora do nosso
-  // controle direto, isso só aumenta a chance de pegar a janela.
+  // (ou depois de delayAfterReconnectMs) em seguida, direto na engine - sem
+  // passar pela fila normal (BullMQ/worker), que introduziria um atraso não
+  // determinístico e mascararia a janela que queremos testar. burstCount > 1
+  // é de propósito: o caso real que originou isso mostrou VÁRIAS mensagens
+  // seguidas falhando pro mesmo contato. Sem garantia de reprodução - é uma
+  // corrida de protocolo fora do nosso controle direto, isso só aumenta a
+  // chance de pegar a janela.
+  //
+  // IMPORTANTE sobre confirmação: "sent" aqui só significa que o WhatsApp
+  // aceitou a mensagem pro relay - não confirma que o destinatário conseguiu
+  // decifrar ("Não foi possível carregar a mensagem" é um erro do LADO DO
+  // RECEPTOR, invisível pra quem manda). O jeito confiável de confirmar
+  // reprodução é olhar o log do engine com LOG_LEVEL=debug procurando
+  // "recv retry request" pro messageId retornado aqui - é o protocolo do
+  // WhatsApp avisando que o destinatário pediu reenvio por falha de
+  // decriptação. Resultado "sent" sem esse log = provavelmente decifrou bem.
   private async dispatchNormal(dto: TestDispatchDto, requester: TestRequesterInfo, texts: string[], burstCount: number) {
     this.logger.warn(
-      `Disparo de TESTE (reconnect + rajada imediata, fora da fila): instancia=${dto.instanceId} ` +
-        `usuario=${requester.id} to=${dto.to} burstCount=${burstCount}`,
+      `Disparo de TESTE (reconnect + rajada${dto.delayAfterReconnectMs ? ` após ${dto.delayAfterReconnectMs}ms` : ' imediata'}, fora da fila): ` +
+        `instancia=${dto.instanceId} usuario=${requester.id} to=${dto.to} burstCount=${burstCount}`,
     );
 
     const { status } = await this.engineClient.reconnect(dto.instanceId);
@@ -66,12 +81,24 @@ export class TestDispatchService {
       throw new BadRequestException(`Instância não ficou conectada a tempo pro teste (status=${status})`);
     }
 
+    if (dto.delayAfterReconnectMs) {
+      await new Promise((resolve) => setTimeout(resolve, dto.delayAfterReconnectMs));
+    }
+
+    const readyAt = Date.now();
+    const recipients = dto.additionalRecipients?.length
+      ? Array.from({ length: burstCount }, (_, i) => dto.additionalRecipients![i % dto.additionalRecipients!.length])
+      : Array.from({ length: burstCount }, () => dto.to);
+
     const results: BurstResult[] = [];
-    for (const messageText of texts) {
+    for (let i = 0; i < texts.length; i++) {
+      const to = recipients[i];
+      const messageText = texts[i];
+
       const messageLog = await this.messageLogRepo.save(
         this.messageLogRepo.create({
           instanceId: dto.instanceId,
-          to: dto.to,
+          to,
           text: messageText,
           status: 'pending',
           dispatchMode: 'test',
@@ -80,13 +107,19 @@ export class TestDispatchService {
       );
 
       try {
-        const result = await this.engineClient.send(dto.instanceId, dto.to, messageText, messageLog.id);
+        const result = await this.engineClient.send(dto.instanceId, to, messageText, messageLog.id);
         await this.messageLogRepo.update(messageLog.id, { status: 'sent', sentAt: new Date() });
-        results.push({ messageLogId: messageLog.id, messageId: result?.messageId, status: 'sent' });
+        results.push({
+          messageLogId: messageLog.id,
+          messageId: result?.messageId,
+          status: 'sent',
+          to,
+          msSinceReady: Date.now() - readyAt,
+        });
       } catch (err) {
         const errorMessage = err.response?.data?.message || err.message || 'Falha desconhecida';
         await this.messageLogRepo.update(messageLog.id, { status: 'failed', failedAt: new Date(), errorMessage });
-        results.push({ messageLogId: messageLog.id, status: 'failed', errorMessage });
+        results.push({ messageLogId: messageLog.id, status: 'failed', errorMessage, to, msSinceReady: Date.now() - readyAt });
       }
     }
 
@@ -95,7 +128,7 @@ export class TestDispatchService {
       throw new BadRequestException(`Disparo de teste falhou: nenhuma das ${burstCount} mensagens foi enviada.`);
     }
 
-    return { results, sentCount, burstCount, aggressive: false };
+    return { results, sentCount, burstCount, aggressive: false, delayAfterReconnectMs: dto.delayAfterReconnectMs ?? 0 };
   }
 
   // Modo AGRESSIVO: abre uma 2ª conexão Baileys concorrente na MESMA sessão
@@ -141,6 +174,7 @@ export class TestDispatchService {
       ),
     );
 
+    const conflictStartedAt = Date.now();
     let engineResults: { status: 'sent' | 'failed'; messageId?: string; errorMessage?: string }[];
     try {
       ({ results: engineResults } = await this.engineClient.forceSessionConflict(dto.instanceId, dto.to, texts));
@@ -164,7 +198,17 @@ export class TestDispatchService {
           errorMessage: engineResult.errorMessage,
         });
       }
-      results.push({ messageLogId: logs[i].id, messageId: engineResult.messageId, status: engineResult.status, errorMessage: engineResult.errorMessage });
+      results.push({
+        messageLogId: logs[i].id,
+        messageId: engineResult.messageId,
+        status: engineResult.status,
+        errorMessage: engineResult.errorMessage,
+        to: dto.to,
+        // aproximado - a engine manda a rajada em loop sequencial e não
+        // devolve timestamp por mensagem, só o elapsed desde que a 2ª conexão
+        // (shadow) começou a ser aberta
+        msSinceReady: Date.now() - conflictStartedAt,
+      });
     }
 
     const sentCount = results.filter((r) => r.status === 'sent').length;
