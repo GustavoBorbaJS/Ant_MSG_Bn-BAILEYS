@@ -41,13 +41,6 @@ export function UsersPage() {
     onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível alterar o status do usuário.'),
   });
 
-  const setCanDispatchTestMutation = useMutation({
-    mutationFn: ({ id, canDispatchTest }: { id: string; canDispatchTest: boolean }) =>
-      api.patch(`/users/${id}`, { canDispatchTest }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
-    onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível alterar a permissão de disparo de teste.'),
-  });
-
   function handleDelete(user: CrmUser) {
     if (confirm(`Remover o usuário "${user.name}"?`)) {
       deleteMutation.mutate(user.id);
@@ -85,7 +78,6 @@ export function UsersPage() {
               <th className="px-4 py-2">Email</th>
               <th className="px-4 py-2">Papel</th>
               <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Disparo de teste</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -119,25 +111,6 @@ export function UsersPage() {
                     {user.active ? 'Ativo' : 'Bloqueado'}
                   </span>
                 </td>
-                <td className="px-4 py-2">
-                  {user.role === 'admin' ? (
-                    <span className="text-xs text-gray-400 dark:text-gray-500">Sempre (admin)</span>
-                  ) : (
-                    <button
-                      onClick={() =>
-                        setCanDispatchTestMutation.mutate({ id: user.id, canDispatchTest: !user.canDispatchTest })
-                      }
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        user.canDispatchTest
-                          ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400'
-                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                      }`}
-                      title="Permite usar o disparo de teste exclusivo (reconecta a instância e envia na hora)"
-                    >
-                      {user.canDispatchTest ? 'Liberado' : 'Bloqueado'}
-                    </button>
-                  )}
-                </td>
                 <td className="px-4 py-2 text-right">
                   <button
                     onClick={() => handleToggleActive(user)}
@@ -166,7 +139,7 @@ export function UsersPage() {
             ))}
             {users?.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-400 dark:text-gray-500">
+                <td colSpan={6} className="px-4 py-6 text-center text-gray-400 dark:text-gray-500">
                   Nenhum usuário ainda.
                 </td>
               </tr>

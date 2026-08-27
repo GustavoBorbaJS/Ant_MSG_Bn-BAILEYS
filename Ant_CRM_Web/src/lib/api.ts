@@ -108,7 +108,6 @@ export interface CrmUser {
   email: string;
   role: UserRole;
   active: boolean;
-  canDispatchTest: boolean;
   avatarFilename: string | null;
   createdAt: string;
   updatedAt: string;
@@ -120,7 +119,7 @@ export function userAvatarUrl(userId: string): string {
 }
 
 export type MessageStatus = 'pending' | 'sent' | 'failed';
-export type DispatchMode = 'auto' | 'direct' | 'test';
+export type DispatchMode = 'auto' | 'direct';
 
 export interface MessageLog {
   id: string;
@@ -177,5 +176,4 @@ export interface CurrentUser {
   email: string;
   role: UserRole;
   avatarFilename: string | null;
-  canDispatchTest: boolean;
 }

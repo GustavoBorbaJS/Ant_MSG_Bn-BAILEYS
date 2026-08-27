@@ -53,27 +53,4 @@ export class EngineClientService {
     const response = await this.axios.delete(`/instances/${instanceId}`);
     return response.data;
   }
-
-  // Chama o /send da engine DIRETO, sem passar pela fila (BullMQ) que o
-  // worker normal usa - ver TestDispatchService. É de propósito: o objetivo
-  // ali é mandar a mensagem o mais rápido possível depois do reconnect,
-  // e a fila introduziria uma espera não determinística (poll do worker,
-  // rate limit, delay humano) que mascararia justamente a janela de
-  // sincronismo que o teste quer flagrar.
-  async send(instanceId: string, to: string, text: string, messageId?: string): Promise<{ messageId: string }> {
-    const response = await this.axios.post('/send', { instanceId, to, text, messageId });
-    return response.data;
-  }
-
-  // Modo AGRESSIVO do disparo de teste - ver TestDispatchService e
-  // Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts (forceReconnect). Abre uma
-  // 2ª conexão concorrente na mesma sessão de propósito pra forçar a
-  // principal a cair e reconectar sozinha (o que PODE derrubar/corromper a
-  // instância - só chamar com o usuário ciente do risco), e devolve o
-  // controle assim que ela volta a 'connected'. Quem manda a rajada de teste
-  // é o caller, via send() normal, com o delay que quiser depois disso.
-  async forceReconnect(instanceId: string): Promise<{ status: string }> {
-    const response = await this.axios.post(`/instances/${instanceId}/force-reconnect`);
-    return response.data;
-  }
 }

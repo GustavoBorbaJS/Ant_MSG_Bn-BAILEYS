@@ -46,7 +46,6 @@ export class AuthController {
       email: user.email,
       role: user.role,
       avatarFilename: user.avatarFilename,
-      canDispatchTest: user.canDispatchTest,
     };
   }
 

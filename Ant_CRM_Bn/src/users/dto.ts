@@ -33,13 +33,6 @@ export class UpdateUserDto {
   @IsOptional()
   @IsIn(['admin', 'user'])
   role?: UserRole;
-
-  // Libera o disparo de teste (ver TestDispatchService) pra esse usuário
-  // específico, mesmo sem ser admin. Admin sempre pode usar independente
-  // dessa flag.
-  @IsOptional()
-  @IsBoolean()
-  canDispatchTest?: boolean;
 }
 
 export class SetUserActiveDto {

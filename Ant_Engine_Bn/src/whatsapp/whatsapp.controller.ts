@@ -107,30 +107,6 @@ export class WhatsappController {
     return this.whatsappService.listInstances();
   }
 
-  // Modo AGRESSIVO do disparo de teste (ver WhatsappService.forceReconnect) -
-  // abre uma 2ª conexão concorrente na mesma sessão de propósito pra forçar a
-  // principal a cair e reconectar sozinha, de forma mais determinística que
-  // só reconectar normal. Quem manda a rajada de teste é o caller
-  // (TestDispatchService), via /send normal, depois que isso resolver.
-  // DESTRUTIVO: não existe pra instância Meta Cloud API (não tem sessão local
-  // pra conflitar).
-  @Post('instances/:instanceId/force-reconnect')
-  @HttpCode(200)
-  async forceReconnect(@Param('instanceId') instanceId: string) {
-    assertValidInstanceId(instanceId);
-    if (this.metaCloudService.hasInstance(instanceId)) {
-      throw new BadRequestException('Modo agressivo não se aplica a instâncias Meta Cloud API (não têm sessão local).');
-    }
-    try {
-      return await this.whatsappService.forceReconnect(instanceId);
-    } catch (err) {
-      if (err instanceof InstanceNotConnectedError) {
-        throw new HttpException(err.message, HttpStatus.CONFLICT);
-      }
-      throw new HttpException(err.message, HttpStatus.SERVICE_UNAVAILABLE);
-    }
-  }
-
   // Apaga a sessao (nao e so um reconnect) - pra desatolar uma instancia
   // presa numa sessao morta/invalida, sem precisar entrar no servidor.
   // Nao se aplica a Meta Cloud API (nao tem sessao local pra limpar).

@@ -164,15 +164,6 @@ export function ShareIcon({ className }: IconProps) {
   );
 }
 
-export function TestTubeIcon({ className }: IconProps) {
-  return (
-    <svg {...base} className={className}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 2.5h6M10 3v11.8a5 5 0 1 0 4 0V3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 14h5" />
-    </svg>
-  );
-}
-
 export function LayersIcon({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

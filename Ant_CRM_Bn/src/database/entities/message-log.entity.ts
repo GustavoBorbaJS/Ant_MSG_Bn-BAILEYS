@@ -57,11 +57,9 @@ export class MessageLog {
 
   // 'direct' = disparo manual que pulou o rate limit do anti-ban (ver
   // CampaignsService.dispatch) - guardado por mensagem pra dar rastreabilidade
-  // de quem decidiu ignorar a proteção e quando. 'test' = disparo de teste
-  // (reconecta + envia na hora, fora da fila - ver TestDispatchService),
-  // exclusivo de admin/usuários autorizados.
+  // de quem decidiu ignorar a proteção e quando.
   @Column({ default: 'auto' })
-  dispatchMode: 'auto' | 'direct' | 'test';
+  dispatchMode: 'auto' | 'direct';
 
   @Column({ nullable: true })
   dispatchedBy: string;
