@@ -15,6 +15,21 @@ import { CreateCampaignDto, DispatchCampaignDto, DispatchMode, RetryFailedDto, U
 
 type Progress = { pending: number; sent: number; failed: number };
 
+type MessageAttachment = { imageUrl?: string; documentFileName?: string };
+
+interface OutgoingMessage {
+  campaignId: string;
+  instanceId: string;
+  to: string;
+  text: string;
+  contactId: string;
+  mode: DispatchMode;
+  dispatchedBy: string;
+  attachment: MessageAttachment;
+  // ms até o job ficar elegível (agendamento/lotes do modo direto)
+  delay?: number;
+}
+
 const ALLOWED_ATTACHMENT_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
@@ -199,6 +214,55 @@ export class CampaignsService {
     }
   }
 
+  // Anexo da campanha no formato que o job da fila espera.
+  // imageUrl: ver comentario em configuration.ts sobre a limitação com Meta Cloud API.
+  // documentFileName: PDF vai como "document" no WhatsApp (nao "image") - a
+  // extensão do proprio imageFilename ja diz qual e (ver ALLOWED_ATTACHMENT_EXT),
+  // e a presença desse campo é o sinal que a engine usa pra decidir o tipo de
+  // mensagem (ver Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts).
+  private resolveAttachment(campaign: Campaign): MessageAttachment {
+    if (!campaign.imageFilename) return {};
+
+    const imageUrl = `${this.configService.get<string>('internalUrl')}/campaigns/${campaign.id}/image`;
+    if (!campaign.imageFilename.toLowerCase().endsWith('.pdf')) {
+      return { imageUrl };
+    }
+
+    const safeName = campaign.name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'documento';
+    return { imageUrl, documentFileName: `${safeName}.pdf` };
+  }
+
+  // Unidade de disparo: grava a message_log 'pending' e enfileira o job
+  // correspondente. Devolve o id da message_log.
+  private async createAndEnqueue(message: OutgoingMessage): Promise<string> {
+    const messageLog = await this.messageLogRepo.save(
+      this.messageLogRepo.create({
+        instanceId: message.instanceId,
+        to: message.to,
+        text: message.text,
+        status: 'pending',
+        campaignId: message.campaignId,
+        contactId: message.contactId,
+        dispatchMode: message.mode,
+        dispatchedBy: message.dispatchedBy,
+      }),
+    );
+
+    await this.queueProducer.enqueue(
+      {
+        messageLogId: messageLog.id,
+        instanceId: message.instanceId,
+        to: message.to,
+        text: message.text,
+        skipRateLimit: message.mode === 'direct',
+        ...message.attachment,
+      },
+      { delay: message.delay },
+    );
+
+    return messageLog.id;
+  }
+
   // Mesmo caminho que Ant_MSG_Bn/scripts/enqueue-batch.js ja fazia manualmente:
   // insere message_logs 'pending' + enfileira na fila 'messages'. O worker
   // (MessageConsumer) processa esses jobs identico a qualquer outro - nao muda
@@ -208,7 +272,7 @@ export class CampaignsService {
   // confirmado no front - acknowledgeRisk obrigatorio) pra rodar um teste
   // manual, opcionalmente em lotes (ex: 200/100/200) espacados por
   // batchIntervalMinutes. Cada job carrega skipRateLimit:true, que o worker
-  // (Ant_MSG_Bn/src/queue/queue.consumer.ts) usa pra pular o checkRateLimit -
+  // (Ant_MSG_Bn/src/queue/queue.consumer.ts) usa pra pular o waitForSendSlot -
   // ou seja, esse modo REALMENTE ignora os limites de warmup/instancia/globais.
   async dispatch(id: string, dto: DispatchCampaignDto, requester: RequesterInfo) {
     const campaign = await this.findOne(id, requester.id);
@@ -284,19 +348,7 @@ export class CampaignsService {
     const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
     const scheduleDelayMs = scheduledAt ? Math.max(0, scheduledAt.getTime() - Date.now()) : 0;
 
-    // ver comentario em configuration.ts sobre a limitação com Meta Cloud API
-    const imageUrl = campaign.imageFilename
-      ? `${this.configService.get<string>('internalUrl')}/campaigns/${campaign.id}/image`
-      : undefined;
-
-    // PDF vai como "document" no WhatsApp (nao "image") - o nome do arquivo
-    // extraido do proprio imageFilename ja diz qual e (ver ALLOWED_ATTACHMENT_EXT).
-    // Presença de documentFileName é o sinal que a engine usa pra decidir o
-    // tipo de mensagem (ver Ant_Engine_Bn/src/whatsapp/whatsapp.service.ts).
-    const isPdf = campaign.imageFilename?.toLowerCase().endsWith('.pdf');
-    const documentFileName = isPdf
-      ? `${campaign.name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'documento'}.pdf`
-      : undefined;
+    const attachment = this.resolveAttachment(campaign);
 
     const messageLogIds: string[] = [];
     let cursor = 0;
@@ -306,33 +358,19 @@ export class CampaignsService {
       const delay = scheduleDelayMs + batchIndex * intervalMs;
 
       for (const contact of batchContacts) {
-        const messageLog = await this.messageLogRepo.save(
-          this.messageLogRepo.create({
+        messageLogIds.push(
+          await this.createAndEnqueue({
+            campaignId: campaign.id,
             instanceId: dto.instanceId,
             to: contact.phone,
             text: campaign.text,
-            status: 'pending',
-            campaignId: campaign.id,
             contactId: contact.id,
-            dispatchMode: mode,
+            mode,
             dispatchedBy: requester.id,
+            attachment,
+            delay,
           }),
         );
-
-        await this.queueProducer.enqueue(
-          {
-            messageLogId: messageLog.id,
-            instanceId: dto.instanceId,
-            to: contact.phone,
-            text: campaign.text,
-            skipRateLimit: mode === 'direct',
-            imageUrl,
-            documentFileName,
-          },
-          { delay },
-        );
-
-        messageLogIds.push(messageLog.id);
       }
     }
 
@@ -375,7 +413,7 @@ export class CampaignsService {
   // contatos - reaproveita to/text/contactId de cada message_log 'failed' e
   // cria uma nova tentativa 'pending' pra cada uma. instanceId pode ser
   // diferente do original de proposito: o caso comum e a instancia original
-  // ter caido/nunca conectado (ver ensureInstanceReady em
+  // ter caido/nunca conectado (ver waitForInstance em
   // Ant_MSG_Bn/src/queue/queue.consumer.ts, que desiste apos ~20min e marca
   // 'failed') e o usuario reenviar usando outra instancia ja reconectada.
   // O log antigo NAO e apagado nem alterado - fica como registro historico
@@ -398,43 +436,25 @@ export class CampaignsService {
       await this.assertUserDailyLimit(requester.id, failedLogs.length);
     }
 
-    const imageUrl = campaign.imageFilename
-      ? `${this.configService.get<string>('internalUrl')}/campaigns/${campaign.id}/image`
-      : undefined;
-    const isPdf = campaign.imageFilename?.toLowerCase().endsWith('.pdf');
-    const documentFileName = isPdf
-      ? `${campaign.name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'documento'}.pdf`
-      : undefined;
+    const attachment = this.resolveAttachment(campaign);
 
     const messageLogIds: string[] = [];
     for (const old of failedLogs) {
-      const messageLog = await this.messageLogRepo.save(
-        this.messageLogRepo.create({
+      messageLogIds.push(
+        await this.createAndEnqueue({
+          campaignId: campaign.id,
           instanceId: dto.instanceId,
           to: old.to,
           text: old.text,
-          status: 'pending',
-          campaignId: campaign.id,
           contactId: old.contactId,
           // reenvio sempre respeita o anti-ban, mesmo que a tentativa
           // original tenha sido em modo direto - reenviar nao repete o
           // "aceite de risco" original, entao nao herda o bypass.
-          dispatchMode: 'auto',
+          mode: 'auto',
           dispatchedBy: requester.id,
+          attachment,
         }),
       );
-
-      await this.queueProducer.enqueue({
-        messageLogId: messageLog.id,
-        instanceId: dto.instanceId,
-        to: old.to,
-        text: old.text,
-        skipRateLimit: false,
-        imageUrl,
-        documentFileName,
-      });
-
-      messageLogIds.push(messageLog.id);
     }
 
     this.logger.log(

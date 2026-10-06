@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Req } from '@nestjs/common';
 import { EngineClientService } from './engine-client.service';
+import { InstanceHealthService } from './instance-health.service';
 import { AntibanReadonlyService } from '../antiban-readonly/antiban-readonly.service';
 import { InstanceOwnersService } from '../instance-owners/instance-owners.service';
 import { ConnectInstanceDto } from './dto';
@@ -18,6 +19,7 @@ export class InstancesController {
     private readonly engineClient: EngineClientService,
     private readonly antibanReadonly: AntibanReadonlyService,
     private readonly instanceOwners: InstanceOwnersService,
+    private readonly instanceHealth: InstanceHealthService,
   ) {}
 
   @Get()
@@ -78,6 +80,17 @@ export class InstancesController {
     assertValidInstanceId(instanceId);
     await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
     return this.antibanReadonly.getUsage(instanceId);
+  }
+
+  // Checagem de saúde sob demanda: conexão real com o provedor, quedas, rate
+  // limit, entregas e aquecimento -> nota + diagnóstico (ver
+  // InstanceHealthService). A tela chama isto logo após o pareamento e pelo
+  // botão "Saúde" de cada instância.
+  @Get(':instanceId/health')
+  async health(@Param('instanceId') instanceId: string, @Req() req: any) {
+    assertValidInstanceId(instanceId);
+    await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
+    return this.instanceHealth.check(instanceId);
   }
 
   // Apaga a sessão (WhatsApp invalidou, chip trocou de dono, etc) - depois

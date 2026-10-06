@@ -3,6 +3,8 @@ import type { FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { InstanceSummary, InstanceUsage } from '../lib/api';
+import { InstanceHealthPanel } from '../components/InstanceHealthPanel';
+import { Modal } from '../components/Modal';
 
 const STATUS_LABEL: Record<InstanceSummary['status'], string> = {
   connected: 'Conectado',
@@ -29,6 +31,7 @@ const WARMUP_COLOR: Record<InstanceSummary['warmupLevel'], string> = {
 export function InstancesPage() {
   const queryClient = useQueryClient();
   const [pairingId, setPairingId] = useState<string | null>(null);
+  const [healthId, setHealthId] = useState<string | null>(null);
   const [newInstanceId, setNewInstanceId] = useState('');
 
   const { data: instances, isLoading } = useQuery({
@@ -117,6 +120,12 @@ export function InstancesPage() {
                 </td>
                 <td className="px-4 py-2 text-right">
                   <button
+                    onClick={() => setHealthId(instance.instanceId)}
+                    className="mr-2 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                  >
+                    Saúde
+                  </button>
+                  <button
                     onClick={() => startPairing(instance.instanceId)}
                     className="mr-2 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
                   >
@@ -149,6 +158,19 @@ export function InstancesPage() {
       </div>
 
       {pairingId && <PairingDialog instanceId={pairingId} onClose={() => setPairingId(null)} />}
+
+      {healthId && (
+        <Modal onClose={() => setHealthId(null)}>
+          <h2 className="mb-3 font-semibold text-gray-900 dark:text-gray-100">Saúde · {healthId}</h2>
+          <InstanceHealthPanel instanceId={healthId} />
+          <button
+            onClick={() => setHealthId(null)}
+            className="mt-4 w-full rounded-md border border-gray-300 py-1.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+          >
+            Fechar
+          </button>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -217,7 +239,7 @@ function PairingDialog({ instanceId, onClose }: { instanceId: string; onClose: (
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-80 rounded-lg bg-white p-6 text-center shadow-lg dark:bg-gray-900">
+      <div className="max-h-[90vh] w-full max-w-80 overflow-y-auto rounded-lg bg-white p-6 text-center shadow-lg dark:bg-gray-900">
         <h2 className="mb-1 font-semibold text-gray-900 dark:text-gray-100">{instanceId}</h2>
 
         {method === null && (
@@ -278,7 +300,12 @@ function PairingDialog({ instanceId, onClose }: { instanceId: string; onClose: (
                   : 'No WhatsApp: Aparelhos conectados → Conectar com número de telefone → digite o código abaixo'}
             </p>
 
-            {status?.status === 'connected' && <div className="py-8 text-4xl">✅</div>}
+            {/* recém-pareada: já mostra a saúde, sem o usuário precisar pedir */}
+            {status?.status === 'connected' && (
+              <div className="mb-3">
+                <InstanceHealthPanel instanceId={instanceId} />
+              </div>
+            )}
 
             {method === 'qr' && status?.qr && status.status !== 'connected' && (
               <img

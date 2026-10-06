@@ -39,6 +39,13 @@ export default () => ({
     // precisa ser IGUAL ao ENGINE_API_KEY do Ant_Engine_Bn/.env
     apiKey: process.env.ENGINE_API_KEY || '',
   },
+  // Diagnóstico por IA na checagem de saúde da instância (opcional - ver
+  // instances/instance-health-advisor.service.ts). Sem ANTHROPIC_API_KEY a
+  // checagem funciona igual, só sem o texto da IA.
+  healthAi: {
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    model: process.env.HEALTH_AI_MODEL || 'claude-opus-5-5',
+  },
   // mesmos valores do Ant_MSG_Bn/.env - o produtor da fila (queue-producer.service.ts)
   // precisa replicar o defaultJobOptions exato do worker
   worker: {

@@ -7,7 +7,8 @@ import { pino } from 'pino';
 import { Boom } from '@hapi/boom';
 import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, WASocket } from '@whiskeysockets/baileys';
 import { useEncryptedMultiFileAuthState } from './encrypted-auth-state';
-import { InstanceNotConnectedError, InvalidRecipientError } from './errors';
+import { InstanceNotConnectedError, InvalidRecipientError, ProviderRateLimitError } from './errors';
+import { InstanceHealthReport, InstanceTelemetry } from '../common/instance-health';
 
 export type InstanceStatus = 'connecting' | 'qr_code' | 'pairing_code' | 'connected' | 'disconnected';
 
@@ -38,6 +39,8 @@ export class WhatsappService implements OnModuleDestroy {
   private readonly pairingRetries = new Map<string, { count: number; windowStart: number }>();
   private static readonly MAX_PAIRING_RETRIES = 3;
   private static readonly PAIRING_RETRY_WINDOW_MS = 45_000;
+  private readonly telemetry = new InstanceTelemetry();
+  private static readonly HEALTH_PROBE_TIMEOUT_MS = 10_000;
 
   constructor(private configService: ConfigService) {}
 
@@ -105,6 +108,7 @@ export class WhatsappService implements OnModuleDestroy {
         record.qr = undefined;
         record.pairingCode = undefined;
         this.pairingRetries.delete(instanceId);
+        this.telemetry.recordConnected(instanceId);
         this.logger.log(`Instância ${instanceId}: conectada`);
       }
 
@@ -122,6 +126,11 @@ export class WhatsappService implements OnModuleDestroy {
         const restartRequired = statusCode === DisconnectReason.restartRequired;
 
         record.status = 'disconnected';
+        // so conta como queda o que derrubou uma sessão que estava de pé -
+        // QR expirado/handshake de pareamento não diz nada sobre a saúde dela
+        if (wasConnected) {
+          this.telemetry.recordDisconnected(instanceId, DisconnectReason[statusCode] ?? 'desconhecido', statusCode);
+        }
         this.logger.warn(
           `Instância ${instanceId}: desconectada (statusCode=${statusCode}, loggedOut=${loggedOut})`,
         );
@@ -233,6 +242,7 @@ export class WhatsappService implements OnModuleDestroy {
     const sessionsDir = this.configService.get<string>('sessionsDir');
     const authDir = path.join(sessionsDir, instanceId);
     await rm(authDir, { recursive: true, force: true });
+    this.telemetry.forget(instanceId);
   }
 
   async getStatus(instanceId: string): Promise<{ status: InstanceStatus; qr?: string; pairingCode?: string }> {
@@ -293,7 +303,15 @@ export class WhatsappService implements OnModuleDestroy {
       : imageUrl
         ? { image: { url: imageUrl }, caption: text }
         : { text };
-    const sendPromise = instance.sock.sendMessage(jid, content).then((result) => ({ messageId: result?.key?.id }));
+    const sendPromise = instance.sock.sendMessage(jid, content).then(
+      (result) => {
+        this.telemetry.recordSendOk(instanceId);
+        return { messageId: result?.key?.id };
+      },
+      (err) => {
+        throw this.toSendError(instanceId, err);
+      },
+    );
 
     if (idempotencyKey) {
       this.recentSends.set(idempotencyKey, sendPromise);
@@ -303,6 +321,67 @@ export class WhatsappService implements OnModuleDestroy {
     }
 
     return sendPromise;
+  }
+
+  // O WhatsApp sinaliza excesso de ritmo com 429 / "rate-overlimit" - vira
+  // ProviderRateLimitError pro worker pausar a instância em vez de retentar
+  // em cima (ver deferForProviderRateLimit em Ant_MSG_Bn/src/queue/queue.consumer.ts).
+  private toSendError(instanceId: string, err: any): Error {
+    const statusCode = (err as Boom)?.output?.statusCode;
+    const message: string = err?.message || 'Falha ao enviar';
+
+    if (statusCode === 429 || /rate-overlimit/i.test(message)) {
+      this.telemetry.recordRateLimit(instanceId, message);
+      return new ProviderRateLimitError(`WhatsApp limitou o ritmo de envio da instância ${instanceId}: ${message}`);
+    }
+
+    this.telemetry.recordSendFailure(instanceId, message);
+    return err instanceof Error ? err : new Error(message);
+  }
+
+  // Checagem de saúde sob demanda: além do status em memória, faz uma consulta
+  // de verdade ao WhatsApp (onWhatsApp do próprio número) - um socket pode
+  // constar 'connected' e não estar mais respondendo.
+  async getHealth(instanceId: string): Promise<InstanceHealthReport> {
+    const instance = this.instances.get(instanceId);
+    const ownJid = instance?.sock.user?.id;
+    const phoneNumber = ownJid?.split(/[:@]/)[0];
+
+    return {
+      instanceId,
+      provider: 'baileys',
+      status: instance?.status ?? 'disconnected',
+      checkedAt: new Date().toISOString(),
+      probe: await this.probe(instance, phoneNumber),
+      phoneNumber,
+      displayName: instance?.sock.user?.name,
+      session: this.telemetry.session(instanceId),
+      sends: this.telemetry.sendStats(instanceId),
+    };
+  }
+
+  private async probe(instance: InstanceRecord | undefined, phoneNumber?: string): Promise<InstanceHealthReport['probe']> {
+    if (!instance || instance.status !== 'connected' || !phoneNumber) {
+      return { ok: false, error: 'Instância não está conectada' };
+    }
+
+    const startedAt = Date.now();
+    let timer: NodeJS.Timeout;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('WhatsApp não respondeu a tempo')),
+        WhatsappService.HEALTH_PROBE_TIMEOUT_MS,
+      );
+    });
+
+    try {
+      await Promise.race([instance.sock.onWhatsApp(phoneNumber), timeout]);
+      return { ok: true, latencyMs: Date.now() - startedAt };
+    } catch (err) {
+      return { ok: false, latencyMs: Date.now() - startedAt, error: err.message };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async checkNumber(instanceId: string, to: string): Promise<{ exists: boolean; jid?: string }> {

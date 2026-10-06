@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
+import { EngineHealthReport } from './instance-health.rules';
 
 // Mesmo contrato/autenticacao que Ant_MSG_Bn/src/engine/engine.service.ts ja usa
 // contra o Ant_Engine_Bn. A chave fica só aqui no servidor - o frontend nunca vê.
@@ -41,6 +42,13 @@ export class EngineClientService {
 
   async reconnect(instanceId: string): Promise<{ status: string; qr?: string; pairingCode?: string }> {
     const response = await this.axios.post('/reconnect', { instanceId });
+    return response.data;
+  }
+
+  // Checagem sob demanda (o engine consulta o provedor de verdade) - ver
+  // Ant_Engine_Bn/src/common/instance-health.ts pro contrato.
+  async getHealth(instanceId: string): Promise<EngineHealthReport> {
+    const response = await this.axios.get(`/instances/${instanceId}/health`);
     return response.data;
   }
 

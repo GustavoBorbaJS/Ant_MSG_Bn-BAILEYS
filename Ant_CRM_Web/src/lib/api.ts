@@ -42,6 +42,25 @@ export interface InstanceUsage {
   used: { minute: number; hour: number; day: number };
 }
 
+export type HealthVerdict = 'healthy' | 'attention' | 'critical';
+export type HealthCheckStatus = 'ok' | 'warn' | 'fail';
+
+// GET /instances/:id/health - ver Ant_CRM_Bn/src/instances/instance-health.service.ts
+export interface InstanceHealth {
+  instanceId: string;
+  checkedAt: string;
+  provider: 'baileys' | 'meta_cloud' | 'unknown';
+  status: string;
+  phoneNumber?: string;
+  displayName?: string;
+  score: number;
+  verdict: HealthVerdict;
+  checks: { id: string; label: string; status: HealthCheckStatus; detail: string }[];
+  // null = IA desligada ou indisponível nesta checagem (aiEnabled diz qual)
+  ai: { summary: string; risks: string[]; recommendations: string[]; model: string } | null;
+  aiEnabled: boolean;
+}
+
 export type WarmupLevel = 'cold' | 'warm' | 'hot';
 
 export interface AntibanConfig {

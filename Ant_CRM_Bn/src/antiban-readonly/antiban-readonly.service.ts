@@ -76,6 +76,21 @@ export class AntibanReadonlyService implements OnModuleInit, OnModuleDestroy {
     return { level, ageDays };
   }
 
+  // Estado do espaçamento/pausa mantido pelo worker (ver startCooldown em
+  // Ant_MSG_Bn/src/anti-ban/anti-ban.service.ts). Somente leitura, como todo
+  // o resto daqui.
+  async getPacingState(instanceId: string): Promise<{ cooldownRemainingMs: number; rateLimitStrikes: number }> {
+    const [cooldownUntil, strikes] = await Promise.all([
+      this.client.get(`antiban:${instanceId}:cooldown`),
+      this.client.get(`antiban:${instanceId}:cooldownStrikes`),
+    ]);
+
+    return {
+      cooldownRemainingMs: Math.max(0, Number(cooldownUntil || 0) - Date.now()),
+      rateLimitStrikes: Number(strikes) || 0,
+    };
+  }
+
   async getUsage(instanceId: string): Promise<InstanceUsage> {
     const config = await this.settingsService.getConfig();
     const { level, ageDays } = await this.getWarmupLevel(instanceId);

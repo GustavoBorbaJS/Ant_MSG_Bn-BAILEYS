@@ -53,10 +53,13 @@ export class EngineService {
     } catch (error) {
       this.logger.error(`Failed to send message: ${error.message}`);
 
-      // Trata erros específicos da engine
+      // Repassa o corpo inteiro do erro do engine (não só a mensagem) - o 429
+      // dele carrega retryAfterMs, que o consumer usa pra pausar a instância
+      // (ver Ant_Engine_Bn/src/whatsapp/whatsapp.controller.ts).
       if (error.response) {
+        const body = error.response.data;
         throw new HttpException(
-          error.response.data?.message || 'Engine error',
+          body && typeof body === 'object' ? { message: 'Engine error', ...body } : body || 'Engine error',
           error.response.status,
         );
       }

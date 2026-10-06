@@ -17,3 +17,18 @@ export class InvalidRecipientError extends Error {
     this.name = 'InvalidRecipientError';
   }
 }
+
+// O provedor (Meta Cloud API ou o próprio WhatsApp, via Baileys) recusou o
+// envio por excesso de ritmo. Não é problema desta mensagem nem do
+// destinatário - é a instância inteira que precisa desacelerar. Vira 429 no
+// /send, e o worker pausa a instância em vez de gastar retry.
+// retryAfterMs = espera pedida pelo próprio provedor, quando ele informa.
+export class ProviderRateLimitError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = 'ProviderRateLimitError';
+  }
+}

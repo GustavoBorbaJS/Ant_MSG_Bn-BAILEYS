@@ -7,7 +7,7 @@ interface MessageJobData {
   instanceId: string;
   to: string;
   text: string;
-  // true = disparo em modo direto, pula o checkRateLimit no worker
+  // true = disparo em modo direto, pula o waitForSendSlot no worker
   // (Ant_MSG_Bn/src/queue/queue.consumer.ts) - ver CampaignsService.dispatch
   skipRateLimit?: boolean;
   // URL da imagem/PDF da campanha (servida por essa própria API) - ver

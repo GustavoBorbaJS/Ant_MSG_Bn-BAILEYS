@@ -13,7 +13,7 @@ import {
 import { WhatsappService } from './whatsapp.service';
 import { MetaCloudService } from '../meta-cloud/meta-cloud.service';
 import { ConnectDto, InstanceIdDto, SendDto } from './dto';
-import { InstanceNotConnectedError, InvalidRecipientError } from './errors';
+import { InstanceNotConnectedError, InvalidRecipientError, ProviderRateLimitError } from './errors';
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -64,9 +64,17 @@ export class WhatsappController {
       // texto de mensagem de erro:
       //   400 = destinatario invalido (nao adianta retentar)
       //   409 = instancia desconectada (transitorio - deve retentar/aguardar reconexao)
+      //   429 = o provedor (Meta/WhatsApp) limitou o ritmo - o worker pausa a
+      //         instancia inteira; retryAfterMs so vem quando o provedor informa
       //   503 = qualquer outra falha de envio (default, transitorio)
       if (err instanceof InvalidRecipientError) {
         throw new HttpException(err.message, HttpStatus.BAD_REQUEST);
+      }
+      if (err instanceof ProviderRateLimitError) {
+        throw new HttpException(
+          { statusCode: HttpStatus.TOO_MANY_REQUESTS, message: err.message, retryAfterMs: err.retryAfterMs },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       }
       if (err instanceof InstanceNotConnectedError) {
         throw new HttpException(err.message, HttpStatus.CONFLICT);
@@ -82,6 +90,17 @@ export class WhatsappController {
       return this.metaCloudService.getStatus(instanceId);
     }
     return this.whatsappService.getStatus(instanceId);
+  }
+
+  // Checagem de saude sob demanda (consulta o provedor de verdade, nao so o
+  // status em memoria) - consumida pelo CRM em Ant_CRM_Bn/src/instance-health.
+  @Get('instances/:instanceId/health')
+  health(@Param('instanceId') instanceId: string) {
+    assertValidInstanceId(instanceId);
+    if (this.metaCloudService.hasInstance(instanceId)) {
+      return this.metaCloudService.getHealth(instanceId);
+    }
+    return this.whatsappService.getHealth(instanceId);
   }
 
   @Post('reconnect')

@@ -33,11 +33,27 @@ export default () => ({
     // instância caída ao mesmo tempo, disparem reconexões concorrentes
     // (cada uma derrubando/recriando o socket da anterior).
     instanceReconnectCooldownMs: parseInt(process.env.WORKER_INSTANCE_RECONNECT_COOLDOWN_MS, 10) || 15_000,
+    // Quantas vezes a MESMA mensagem pode ser reagendada por rate limit do
+    // provedor (429 do engine) antes de desistir. Cada reagendamento espera o
+    // cooldown da instância (ver antiban.cooldown*) e NAO consome "attempts".
+    maxRateLimitDeferrals: parseInt(process.env.WORKER_MAX_RATE_LIMIT_DEFERRALS, 10) || 5,
   },
   antiban: {
-    // delay humano aplicado antes de cada envio
+    // Espaçamento entre envios da MESMA instância (ver AntiBanService.acquireSendSlot):
+    //   intervalo mínimo = max(60s / perMinute do nível, minDelayMs)
+    //   intervalo real   = mínimo + sorteio de até (maxDelayMs - minDelayMs)
+    // ou seja, minDelayMs é o piso e a diferença pro maxDelayMs é a variação
+    // "humana" somada por cima.
     minDelayMs: parseInt(process.env.ANTIBAN_MIN_DELAY_MS, 10) || 2000,
     maxDelayMs: parseInt(process.env.ANTIBAN_MAX_DELAY_MS, 10) || 6000,
+    // Até quanto tempo um job espera a própria vez DENTRO do worker (segurando
+    // um slot de concorrência). Acima disso ele volta pra fila como 'delayed'
+    // e libera o slot pra outras instâncias.
+    maxInlineWaitMs: parseInt(process.env.ANTIBAN_MAX_INLINE_WAIT_MS, 10) || 5000,
+    // Pausa da instância quando o provedor (Meta/WhatsApp) responde rate
+    // limit: dobra a cada ocorrência seguida (base, 2x, 4x...) até o teto.
+    cooldownBaseMs: parseInt(process.env.ANTIBAN_COOLDOWN_BASE_MS, 10) || 60_000,
+    cooldownMaxMs: parseInt(process.env.ANTIBAN_COOLDOWN_MAX_MS, 10) || 30 * 60_000,
     // dias de idade da instancia para sair de cold -> warm -> hot
     warmupDaysToWarm: parseInt(process.env.ANTIBAN_WARMUP_DAYS_TO_WARM, 10) || 3,
     warmupDaysToHot: parseInt(process.env.ANTIBAN_WARMUP_DAYS_TO_HOT, 10) || 7,
