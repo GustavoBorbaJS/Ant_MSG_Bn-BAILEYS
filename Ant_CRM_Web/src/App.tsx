@@ -11,6 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { MessageLogsPage } from './pages/MessageLogsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityPage } from './pages/ActivityPage';
+import { AiPage } from './pages/AiPage';
 
 export function App() {
   return (
@@ -25,6 +26,7 @@ export function App() {
           <Route path="/campaigns" element={<CampaignsPage />} />
           <Route path="/message-logs" element={<MessageLogsPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/ai" element={<AiPage />} />
 
           <Route element={<AdminRoute />}>
             <Route path="/users" element={<UsersPage />} />

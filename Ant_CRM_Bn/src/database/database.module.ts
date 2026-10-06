@@ -7,6 +7,7 @@ import { MessageLog } from './entities/message-log.entity';
 import { User } from './entities/user.entity';
 import { InstanceOwner } from './entities/instance-owner.entity';
 import { OptOut } from './entities/opt-out.entity';
+import { AiSettings } from './entities/ai-settings.entity';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { OptOut } from './entities/opt-out.entity';
         username: configService.get('database.username'),
         password: configService.get('database.password'),
         database: configService.get('database.database'),
-        entities: [Contact, Campaign, MessageLog, User, InstanceOwner, OptOut],
+        entities: [Contact, Campaign, MessageLog, User, InstanceOwner, OptOut, AiSettings],
         // O CRM eh o unico dono do schema (ver Ant_MSG_Bn/database.module.ts,
         // que roda com synchronize:false por causa disso). Mudanca de schema
         // sempre via migration (npm run migration:generate / migration:run).

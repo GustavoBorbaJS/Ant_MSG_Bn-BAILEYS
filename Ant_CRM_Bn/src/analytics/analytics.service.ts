@@ -16,6 +16,8 @@ const WAIT_BUCKETS = [
   { label: '5min+', max: Infinity },
 ];
 
+type StatusCounts = { sent: number; failed: number; pending: number };
+
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -27,8 +29,40 @@ export class AnalyticsService {
     private readonly instanceOwners: InstanceOwnersService,
   ) {}
 
-  async getTraffic(ownerId: string, instanceId: string | undefined, hours: number) {
-    const since = new Date(Date.now() - hours * 3_600_000);
+  // Totais por status do período pedido e do período imediatamente anterior
+  // de MESMA duração - é contra ele que o painel calcula as variações ("+12%
+  // vs período anterior"). Contado por createdAt, como o gráfico de tráfego,
+  // pra os números do topo baterem com a soma das barras.
+  async getSummary(ownerId: string, since: Date) {
+    const until = new Date();
+    const previousSince = new Date(since.getTime() - (until.getTime() - since.getTime()));
+
+    const [current, previous] = await Promise.all([
+      this.countByStatus(ownerId, since, until),
+      this.countByStatus(ownerId, previousSince, since),
+    ]);
+
+    return { since: since.toISOString(), until: until.toISOString(), current, previous };
+  }
+
+  private async countByStatus(ownerId: string, from: Date, to: Date): Promise<StatusCounts> {
+    const rows = await this.messageLogRepo
+      .createQueryBuilder('m')
+      .select('m.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .where('m.dispatchedBy = :ownerId', { ownerId })
+      .andWhere('m.createdAt >= :from AND m.createdAt < :to', { from, to })
+      .groupBy('m.status')
+      .getRawMany<{ status: keyof StatusCounts; count: string }>();
+
+    const counts: StatusCounts = { sent: 0, failed: 0, pending: 0 };
+    for (const row of rows) {
+      counts[row.status] = Number(row.count);
+    }
+    return counts;
+  }
+
+  async getTraffic(ownerId: string, instanceId: string | undefined, since: Date) {
 
     const qb = this.messageLogRepo
       .createQueryBuilder('m')
@@ -60,8 +94,7 @@ export class AnalyticsService {
     return this.queueProducer.getJobCounts();
   }
 
-  async getWaitTime(ownerId: string, instanceId: string | undefined, hours: number) {
-    const since = new Date(Date.now() - hours * 3_600_000);
+  async getWaitTime(ownerId: string, instanceId: string | undefined, since: Date) {
 
     const qb = this.messageLogRepo
       .createQueryBuilder('m')

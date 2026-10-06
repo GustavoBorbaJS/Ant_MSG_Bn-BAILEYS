@@ -46,7 +46,10 @@ O worker atualiza a `message_log` para `sent` ou `failed`; o painel lê o progre
 | Contrato HTTP do engine (status por tipo de erro) | `Ant_Engine_Bn/src/whatsapp/whatsapp.controller.ts` |
 | Disparo, lotes, agendamento, reenvio de falhas | `Ant_CRM_Bn/src/campaigns/campaigns.service.ts` |
 | Checagem de saúde da instância (regras e pesos) | `Ant_CRM_Bn/src/instances/instance-health.rules.ts` |
-| Diagnóstico por IA da saúde (prompt, modelo) | `Ant_CRM_Bn/src/instances/instance-health-advisor.service.ts` |
+| Diagnóstico por IA da saúde (prompt) | `Ant_CRM_Bn/src/instances/instance-health-advisor.service.ts` |
+| Provedores de IA, chave por usuário | `Ant_CRM_Bn/src/ai/ai-providers.ts`, `ai.service.ts` |
+| "Melhorar com IA" das campanhas (prompt) | `Ant_CRM_Bn/src/ai/campaign-copywriter.service.ts` |
+| Números e períodos do dashboard | `Ant_CRM_Bn/src/analytics/`, `Ant_CRM_Web/src/lib/chartTheme.tsx` |
 | Opt-out: frases aceitas como pedido de saída | `Ant_Engine_Bn/src/whatsapp/opt-out.ts` |
 | Opt-out: lista de quem saiu, filtro no disparo, rodapé | `Ant_CRM_Bn/src/opt-outs/`, `CampaignsService.withOptOutFooter` |
 | Posse de instância por usuário | `Ant_CRM_Bn/src/instance-owners/instance-owners.service.ts` |
@@ -129,10 +132,23 @@ Use estes antes de inventar outro; o nome ajuda a achar o exemplo.
 
 ## Trabalhando com IA neste projeto
 
-- A única chamada a LLM é o diagnóstico de saúde (`instance-health-advisor.service.ts`), via SDK oficial `@anthropic-ai/sdk`, modelo em `HEALTH_AI_MODEL` (padrão `claude-opus-5-5`).
-- **Regras decidem, a IA explica.** Nota e veredito vêm de `instance-health.rules.ts`; o modelo recebe os sinais e a avaliação prontos e devolve resumo, riscos e recomendações em JSON com schema fixo. Não passe decisão de envio ou de bloqueio para o modelo.
+- **Toda chamada a LLM passa por `AiService.complete(userId, system, user)`** (`Ant_CRM_Bn/src/ai/`). Cada usuário cadastra provedor, modelo e chave no menu "IA"; quem usa IA não sabe qual provedor está por trás. Hoje há dois usos: o diagnóstico de saúde e o "Melhorar com IA" das campanhas.
+- Provedores ficam em `ai-providers.ts` (Strategy): Anthropic pelo SDK oficial `@anthropic-ai/sdk`, OpenAI e Gemini por REST. Provedor novo = mais um item em `AI_PROVIDERS`. Nenhum modelo de OpenAI/Gemini é fixado no código: a tela lista os modelos que a chave enxerga.
+- **A chave de API do usuário nunca sai do backend**: fica cifrada em `ai_settings` (`SecretBox`, AES-256-GCM) e as rotas só devolvem os 4 últimos caracteres. Não coloque a chave em log, em resposta nem em outra tabela.
+- Sem chave própria, o usuário cai na `ANTHROPIC_API_KEY` do servidor, se existir (modelo em `HEALTH_AI_MODEL`).
+- **Regras decidem, a IA explica.** Nota e veredito vêm de `instance-health.rules.ts`; o modelo recebe os sinais e a avaliação prontos e devolve resumo, riscos e recomendações em JSON. Como o provedor varia, o JSON é pedido no prompt e conferido em `parseDiagnosis`; resposta fora do formato vira "sem diagnóstico". Não passe decisão de envio ou de bloqueio para o modelo.
+- **A IA sugere, o operador decide.** O texto de campanha gerado só entra na campanha quando o operador clica em "Usar este texto".
 - Ao editar o prompt: descreva a situação e o leitor (operador, não técnico), diga o que fazer em vez do que evitar, explique o motivo de cada restrição e mantenha o vocabulário do sistema (aquecimento, cooldown, modo direto) explicado no próprio prompt, porque o modelo não conhece este código.
-- A saída é sempre lida por `JSON.parse` contra o schema; campo novo entra no schema, no tipo `HealthAiDiagnosis` e no painel.
+- Campo novo no diagnóstico entra no prompt, em `parseDiagnosis`, no tipo `HealthAiDiagnosis` e no painel.
+
+## Dashboard
+
+- Um filtro de período só, no topo (`PERIOD_PRESETS`), recorta tudo menos os dois retratos ao vivo ("Agora no sistema" e aquecimento). Não crie filtro dentro de card.
+- O painel manda `since` (instante ISO) em vez de "horas": "Hoje" é a meia-noite do fuso de quem olha, que o servidor não conhece.
+- As variações comparam com o período anterior de mesma duração (`/analytics/summary`). Sem base anterior a tela diz isso; não invente percentual.
+- `bucketTraffic` preenche com zero as horas/dias sem envio. Não volte a plotar só os pontos que o backend devolve: o eixo do tempo fica mentindo.
+- Cores: verde/cinza/vermelho de status, sempre na ordem enviadas → na fila → falharam (o cinza separa os dois que daltônicos confundem). Texto e legenda usam cor de texto, nunca a cor da série.
+- "Agora no sistema" vem da fila do BullMQ e soma todos os usuários; o resto do dashboard é só do usuário logado.
 
 ## Comandos
 

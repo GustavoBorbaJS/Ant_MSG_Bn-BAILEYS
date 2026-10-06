@@ -91,7 +91,7 @@ export function InstanceHealthPanel({ instanceId }: { instanceId: string }) {
         <p className="text-xs text-gray-400 dark:text-gray-500">
           {health.aiEnabled
             ? 'Diagnóstico da IA indisponível nesta checagem - a nota acima vem das regras do sistema.'
-            : 'Diagnóstico da IA desligado (ANTHROPIC_API_KEY não configurada) - a nota acima vem das regras do sistema.'}
+            : 'Diagnóstico da IA desligado: cadastre sua chave de API no menu "IA". A nota acima vem das regras do sistema.'}
         </p>
       )}
     </div>

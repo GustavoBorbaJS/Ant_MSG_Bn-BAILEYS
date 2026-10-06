@@ -5,6 +5,9 @@ import type { TrafficPoint } from './api';
 // Status nunca muda por tema (mesmo hex claro/escuro); o resto troca por modo.
 export interface ChartPalette {
   surface: string;
+  // fundo dos cards (bg-white / dark:bg-gray-900) - é a cor do "vão" de 2px
+  // entre segmentos empilhados, que precisa sumir no fundo do card
+  card: string;
   primaryInk: string;
   secondaryInk: string;
   mutedInk: string;
@@ -34,6 +37,7 @@ const ORDINAL_BLUE_DARK = ['#184f95', '#256abf', '#3987e5', '#86b6ef', '#cde2fb'
 
 const LIGHT: ChartPalette = {
   surface: '#fcfcfb',
+  card: '#ffffff',
   primaryInk: '#0b0b0b',
   secondaryInk: '#52514e',
   mutedInk: '#898781',
@@ -47,6 +51,7 @@ const LIGHT: ChartPalette = {
 
 const DARK: ChartPalette = {
   surface: '#1a1a19',
+  card: '#111827',
   primaryInk: '#ffffff',
   secondaryInk: '#c3c2b7',
   mutedInk: '#898781',
@@ -92,49 +97,95 @@ export function formatCompact(n: number): string {
   return n.toLocaleString('pt-BR');
 }
 
-export const PERIOD_PRESETS: { label: string; hours: number }[] = [
-  { label: '24h', hours: 24 },
-  { label: '48h', hours: 48 },
-  { label: '7 dias', hours: 24 * 7 },
-  { label: '30 dias', hours: 24 * 30 },
+export type PeriodId = 'today' | '24h' | '48h' | '7d' | '30d';
+
+export interface PeriodPreset {
+  id: PeriodId;
+  label: string;
+  // como o período aparece numa frase ("Enviadas hoje", "Enviadas nos últimos 7 dias")
+  phrase: string;
+  // null = desde a meia-noite de hoje (no fuso de quem está olhando)
+  hours: number | null;
+}
+
+export const PERIOD_PRESETS: PeriodPreset[] = [
+  { id: 'today', label: 'Hoje', phrase: 'hoje', hours: null },
+  { id: '24h', label: '24h', phrase: 'nas últimas 24h', hours: 24 },
+  { id: '48h', label: '48h', phrase: 'nas últimas 48h', hours: 48 },
+  { id: '7d', label: '7 dias', phrase: 'nos últimos 7 dias', hours: 24 * 7 },
+  { id: '30d', label: '30 dias', phrase: 'nos últimos 30 dias', hours: 24 * 30 },
 ];
 
-// Acima de 48h, agrupar por hora vira ruido ilegivel (ate 720 pontos) - reagrupa
-// por dia no cliente em vez de mudar o endpoint (que continua servindo por hora).
-export function bucketTraffic(points: TrafficPoint[], hours: number): Array<TrafficPoint & { label: string }> {
-  if (hours <= 48) {
-    return points.map((p) => ({
-      ...p,
-      label: new Date(p.hour).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit' }),
-    }));
-  }
+const HOUR_MS = 3_600_000;
 
-  const byDay = new Map<string, TrafficPoint>();
-  for (const p of points) {
-    const dateKey = p.hour.slice(0, 10);
-    const bucket = byDay.get(dateKey) ?? { hour: dateKey, sent: 0, failed: 0, pending: 0 };
-    bucket.sent += p.sent;
-    bucket.failed += p.failed;
-    bucket.pending += p.pending;
-    byDay.set(dateKey, bucket);
+// Início do período, calculado no navegador de propósito: "hoje" é a
+// meia-noite do fuso do usuário, que o servidor não conhece.
+export function periodStart(preset: PeriodPreset, now = new Date()): Date {
+  if (preset.hours === null) {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   }
-
-  return Array.from(byDay.values())
-    .sort((a, b) => a.hour.localeCompare(b.hour))
-    .map((b) => ({ ...b, label: new Date(b.hour).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) }));
+  return new Date(now.getTime() - preset.hours * HOUR_MS);
 }
 
-// Compara a 2a metade do periodo buscado com a 1a - sem chamada extra ao
-// backend. Metrica generica: soma de "sent" (volume) ou taxa de entrega.
-export function splitHalves<T>(points: T[]): { previous: T[]; current: T[] } {
-  const mid = Math.floor(points.length / 2);
-  return { previous: points.slice(0, mid), current: points.slice(mid) };
+export interface TrafficBucket {
+  // início do intervalo (ms) - chave estável pra tabela/eixo
+  start: number;
+  label: string;
+  sent: number;
+  failed: number;
+  pending: number;
 }
 
+// Monta a série do gráfico de tráfego com TODOS os intervalos do período,
+// inclusive os sem envio (zerados). O backend só devolve as horas que
+// tiveram mensagem; sem preencher os buracos, duas horas distantes ficavam
+// lado a lado no eixo e o gráfico escondia justamente os períodos parados.
+//
+// Até 48h cada barra é uma hora; acima disso, um dia (no fuso do usuário -
+// agrupar pela data UTC jogava os envios da noite no dia seguinte).
+export function bucketTraffic(points: TrafficPoint[], since: Date, until = new Date()): TrafficBucket[] {
+  const byDay = until.getTime() - since.getTime() > 48 * HOUR_MS;
+
+  const startOf = (date: Date): Date =>
+    byDay
+      ? new Date(date.getFullYear(), date.getMonth(), date.getDate())
+      : new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours());
+  const next = (date: Date): Date => {
+    const copy = new Date(date);
+    if (byDay) copy.setDate(copy.getDate() + 1);
+    else copy.setHours(copy.getHours() + 1);
+    return copy;
+  };
+  const sameDayRange = startOf(since).toDateString() === until.toDateString();
+  const labelOf = (date: Date): string => {
+    const day = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    if (byDay) return day;
+    const hour = `${String(date.getHours()).padStart(2, '0')}h`;
+    return sameDayRange ? hour : `${day} ${hour}`;
+  };
+
+  const buckets = new Map<number, TrafficBucket>();
+  for (let cursor = startOf(since); cursor <= until; cursor = next(cursor)) {
+    buckets.set(cursor.getTime(), { start: cursor.getTime(), label: labelOf(cursor), sent: 0, failed: 0, pending: 0 });
+  }
+
+  for (const point of points) {
+    const bucket = buckets.get(startOf(new Date(point.hour)).getTime());
+    if (!bucket) continue;
+    bucket.sent += point.sent;
+    bucket.failed += point.failed;
+    bucket.pending += point.pending;
+  }
+
+  return Array.from(buckets.values());
+}
+
+// Variação percentual contra o período anterior. Sem base (anterior = 0) não
+// existe percentual honesto - devolve null e a tela diz "sem base anterior"
+// em vez de inventar um "+100%".
 export function pctDelta(previous: number, current: number): number | null {
-  if (previous > 0) return ((current - previous) / previous) * 100;
-  if (current > 0) return 100;
-  return null;
+  if (previous <= 0) return null;
+  return ((current - previous) / previous) * 100;
 }
 
 // Tooltip compartilhado pros graficos do dashboard - valor em destaque

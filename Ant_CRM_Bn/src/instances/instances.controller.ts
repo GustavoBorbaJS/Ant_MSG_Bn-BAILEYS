@@ -90,7 +90,7 @@ export class InstancesController {
   async health(@Param('instanceId') instanceId: string, @Req() req: any) {
     assertValidInstanceId(instanceId);
     await this.instanceOwners.assertAccess(instanceId, { id: req.user.sub, role: req.user.role });
-    return this.instanceHealth.check(instanceId);
+    return this.instanceHealth.check(instanceId, req.user.sub);
   }
 
   // Apaga a sessão (WhatsApp invalidou, chip trocou de dono, etc) - depois

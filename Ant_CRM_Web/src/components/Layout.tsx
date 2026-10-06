@@ -22,6 +22,7 @@ import {
   LogoutIcon,
   MenuIcon,
   SettingsIcon,
+  SparklesIcon,
   UsersIcon,
 } from './icons';
 
@@ -31,6 +32,7 @@ const navItems = [
   { to: '/contacts', label: 'Contatos', icon: ContactsIcon },
   { to: '/instances', label: 'Instâncias', icon: InstancesIcon },
   { to: '/message-logs', label: 'Histórico', icon: HistoryIcon },
+  { to: '/ai', label: 'IA', icon: SparklesIcon },
 ];
 
 const adminNavItems = [

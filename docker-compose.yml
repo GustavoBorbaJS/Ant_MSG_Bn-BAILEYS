@@ -82,9 +82,11 @@ services:
       CRM_JWT_EXPIRES_IN: ${CRM_JWT_EXPIRES_IN:-24h}
       # rodapé de saída somado às mensagens de campanha (vazio = texto padrão, "off" = sem rodapé)
       OPT_OUT_FOOTER: ${OPT_OUT_FOOTER:-}
-      # opcional - diagnóstico por IA na checagem de saúde da instância
+      # IA: cada usuário cadastra a própria chave no menu "IA". Estas são
+      # opcionais (chave padrão do servidor e segredo de cifragem das chaves)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       HEALTH_AI_MODEL: ${HEALTH_AI_MODEL:-claude-opus-5-5}
+      AI_KEYS_ENCRYPTION_KEY: ${AI_KEYS_ENCRYPTION_KEY:-}
       UPLOADS_DIR: /app/uploads
     volumes:
       - antiban_crm_uploads:/app/uploads

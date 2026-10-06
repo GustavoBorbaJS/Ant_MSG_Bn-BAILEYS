@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import Anthropic from '@anthropic-ai/sdk';
+import { AiService } from '../ai/ai.service';
 import { HealthAssessment, HealthSignals } from './instance-health.rules';
 
 export interface HealthAiDiagnosis {
@@ -21,78 +20,67 @@ Seu trabalho é explicar para o operador, em português do Brasil e em linguagem
 Regras:
 - Baseie-se apenas nos dados recebidos. Não invente números, eventos nem causas que os dados não sustentam; quando a amostra for pequena demais para concluir algo, diga isso.
 - Não contradiga o veredito das regras: você interpreta e prioriza, não recalcula a nota.
-- "summary": 2 a 3 frases diretas com o estado atual.
-- "risks": de 0 a 4 itens, do mais grave para o menos grave. Lista vazia se não houver risco real.
-- "recommendations": de 1 a 4 ações concretas e executáveis neste sistema (por exemplo: reconectar a instância, esperar a pausa do provedor acabar, reduzir o volume diário, manter o aquecimento, revisar a lista de contatos, não usar o modo direto).
 
-Contexto do sistema: instâncias novas passam por aquecimento (níveis cold, warm, hot) com limites de envio por minuto, hora e dia. "cooldown" é uma pausa automática aplicada quando o provedor (Meta/WhatsApp) responde com rate limit. O "modo direto" de disparo ignora o aquecimento e é o principal fator de risco de bloqueio.`;
+Contexto do sistema: instâncias novas passam por aquecimento (níveis cold, warm, hot) com limites de envio por minuto, hora e dia. "cooldown" é uma pausa automática aplicada quando o provedor (Meta/WhatsApp) responde com rate limit. O "modo direto" de disparo ignora o aquecimento e é o principal fator de risco de bloqueio.
 
-const DIAGNOSIS_SCHEMA = {
-  type: 'object',
-  properties: {
-    summary: { type: 'string' },
-    risks: { type: 'array', items: { type: 'string' } },
-    recommendations: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['summary', 'risks', 'recommendations'],
-  additionalProperties: false,
-};
+Formato da resposta: somente um objeto JSON, sem texto antes ou depois e sem bloco de código, com exatamente estas chaves:
+- "summary": string com 2 a 3 frases diretas sobre o estado atual.
+- "risks": lista de 0 a 4 strings, do risco mais grave para o menos grave. Lista vazia se não houver risco real.
+- "recommendations": lista de 1 a 4 strings, cada uma uma ação concreta e executável neste sistema (por exemplo: reconectar a instância, esperar a pausa do provedor acabar, reduzir o volume diário, manter o aquecimento, revisar a lista de contatos, não usar o modo direto).`;
 
-// Camada OPCIONAL por cima das regras (instance-health.rules.ts): só existe
-// se ANTHROPIC_API_KEY estiver configurada. As regras decidem nota e veredito;
-// a IA só traduz os sinais em diagnóstico e próximos passos. Qualquer falha
-// aqui (sem chave, timeout, recusa) devolve null e a tela mostra só as regras -
-// a checagem de saúde nunca depende da IA estar no ar.
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+// A resposta vem de provedores diferentes (ver ai/ai-providers.ts) e nem
+// todos garantem JSON puro - alguns embrulham em bloco de código ou soltam
+// uma frase antes. Pega o primeiro objeto do texto e confere o formato;
+// qualquer coisa fora do esperado vira null (tela mostra só as regras).
+function parseDiagnosis(text: string): Omit<HealthAiDiagnosis, 'model'> | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1));
+    if (typeof parsed.summary !== 'string' || !isStringArray(parsed.risks) || !isStringArray(parsed.recommendations)) {
+      return null;
+    }
+    return { summary: parsed.summary, risks: parsed.risks, recommendations: parsed.recommendations };
+  } catch {
+    return null;
+  }
+}
+
+// Camada OPCIONAL por cima das regras (instance-health.rules.ts): usa a IA
+// que o usuário configurou no menu "IA" (ver AiService). As regras decidem
+// nota e veredito; a IA só traduz os sinais em diagnóstico e próximos
+// passos. Qualquer falha aqui (sem IA configurada, chave inválida, timeout,
+// resposta fora do formato) devolve null e a tela mostra só as regras - a
+// checagem de saúde nunca depende da IA estar no ar.
 @Injectable()
 export class InstanceHealthAdvisorService {
   private readonly logger = new Logger(InstanceHealthAdvisorService.name);
-  private readonly client: Anthropic | null;
-  private readonly model: string;
 
-  constructor(configService: ConfigService) {
-    const apiKey = configService.get<string>('healthAi.apiKey');
-    this.model = configService.get<string>('healthAi.model');
-    // timeout/retries curtos: isto roda dentro de uma requisição do painel
-    this.client = apiKey ? new Anthropic({ apiKey, timeout: 45_000, maxRetries: 1 }) : null;
+  constructor(private readonly aiService: AiService) {}
+
+  isEnabledFor(userId: string): Promise<boolean> {
+    return this.aiService.isConfigured(userId);
   }
 
-  get enabled(): boolean {
-    return this.client !== null;
-  }
-
-  async diagnose(signals: HealthSignals, assessment: HealthAssessment): Promise<HealthAiDiagnosis | null> {
-    if (!this.client) return null;
+  async diagnose(userId: string, signals: HealthSignals, assessment: HealthAssessment): Promise<HealthAiDiagnosis | null> {
+    if (!(await this.aiService.isConfigured(userId))) return null;
 
     try {
-      const response = await this.client.beta.messages.create({
-        model: this.model,
-        max_tokens: 16000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        system: SYSTEM_PROMPT,
-        output_config: { effort: 'low', format: { type: 'json_schema', schema: DIAGNOSIS_SCHEMA } },
-        messages: [{ role: 'user', content: JSON.stringify({ assessment, signals }) }],
-      });
-
-      if (response.stop_reason !== 'end_turn') {
-        this.logger.warn(`Diagnóstico por IA não concluído (stop_reason=${response.stop_reason})`);
+      const { text, model } = await this.aiService.complete(userId, SYSTEM_PROMPT, JSON.stringify({ assessment, signals }));
+      const diagnosis = parseDiagnosis(text);
+      if (!diagnosis) {
+        this.logger.warn(`Diagnóstico por IA fora do formato esperado (modelo ${model})`);
         return null;
       }
-
-      const text = response.content.find((block) => block.type === 'text');
-      if (!text || text.type !== 'text') return null;
-
-      return { ...(JSON.parse(text.text) as Omit<HealthAiDiagnosis, 'model'>), model: response.model };
+      return { ...diagnosis, model };
     } catch (error) {
-      if (error instanceof Anthropic.AuthenticationError) {
-        this.logger.error('ANTHROPIC_API_KEY inválida - diagnóstico por IA indisponível');
-      } else if (error instanceof Anthropic.RateLimitError) {
-        this.logger.warn('Diagnóstico por IA indisponível: rate limit da API da Anthropic');
-      } else if (error instanceof Anthropic.APIError) {
-        this.logger.error(`Diagnóstico por IA falhou (${error.status}): ${error.message}`);
-      } else {
-        this.logger.error(`Diagnóstico por IA falhou: ${error.message}`);
-      }
+      this.logger.warn(`Diagnóstico por IA indisponível: ${error.message}`);
       return null;
     }
   }

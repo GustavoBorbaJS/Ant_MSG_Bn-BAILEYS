@@ -53,12 +53,17 @@ export default () => ({
   optOut: {
     footer: resolveOptOutFooter(process.env.OPT_OUT_FOOTER),
   },
-  // Diagnóstico por IA na checagem de saúde da instância (opcional - ver
-  // instances/instance-health-advisor.service.ts). Sem ANTHROPIC_API_KEY a
-  // checagem funciona igual, só sem o texto da IA.
-  healthAi: {
-    apiKey: process.env.ANTHROPIC_API_KEY || '',
-    model: process.env.HEALTH_AI_MODEL || 'claude-opus-5-5',
+  // IA (ver ai/ai.service.ts). Cada usuário cadastra a própria chave no menu
+  // "IA" do painel; ela é guardada cifrada com encryptionSecret.
+  ai: {
+    // Por padrão reaproveita o CRM_JWT_SECRET, pra não exigir mais uma env.
+    // Trocar este segredo invalida as chaves já salvas (os usuários só
+    // precisam recadastrar).
+    encryptionSecret: process.env.AI_KEYS_ENCRYPTION_KEY || process.env.CRM_JWT_SECRET || '',
+    // Opcional: chave da Anthropic do servidor, usada só por quem ainda não
+    // cadastrou a própria.
+    serverAnthropicKey: process.env.ANTHROPIC_API_KEY || '',
+    serverAnthropicModel: process.env.HEALTH_AI_MODEL || 'claude-opus-5-5',
   },
   // mesmos valores do Ant_MSG_Bn/.env - o produtor da fila (queue-producer.service.ts)
   // precisa replicar o defaultJobOptions exato do worker

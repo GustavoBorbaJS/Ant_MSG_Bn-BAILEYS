@@ -42,6 +42,25 @@ export interface InstanceUsage {
   used: { minute: number; hour: number; day: number };
 }
 
+export type AiProviderId = 'anthropic' | 'openai' | 'gemini';
+
+export interface AiModelOption {
+  id: string;
+  label: string;
+}
+
+// GET /ai/settings - configuração de IA do próprio usuário (a chave nunca vem,
+// só o final dela em keyHint). source 'server' = sem chave própria, usando a
+// do servidor. Ver Ant_CRM_Bn/src/ai/ai.service.ts.
+export interface AiSettings {
+  configured: boolean;
+  source: 'user' | 'server' | null;
+  provider: AiProviderId | null;
+  model: string | null;
+  keyHint: string | null;
+  providers: { id: AiProviderId; label: string; keyUrl: string; keyPlaceholder: string; defaultModel: string | null }[];
+}
+
 export type HealthVerdict = 'healthy' | 'attention' | 'critical';
 export type HealthCheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -163,6 +182,15 @@ export interface TrafficPoint {
   sent: number;
   failed: number;
   pending: number;
+}
+
+// GET /analytics/summary - totais do período e do período anterior de mesma
+// duração (base das variações do dashboard)
+export interface AnalyticsSummary {
+  since: string;
+  until: string;
+  current: { sent: number; failed: number; pending: number };
+  previous: { sent: number; failed: number; pending: number };
 }
 
 export interface QueueDepth {

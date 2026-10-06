@@ -11,6 +11,7 @@ import { MessageLogsModule } from './message-logs/message-logs.module';
 import { SettingsModule } from './settings/settings.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { OptOutsModule } from './opt-outs/opt-outs.module';
+import { AiModule } from './ai/ai.module';
 import { JwtAuthGuard } from './common/jwt-auth.guard';
 import configuration from './config/configuration';
 
@@ -30,6 +31,7 @@ import configuration from './config/configuration';
     SettingsModule,
     AnalyticsModule,
     OptOutsModule,
+    AiModule,
   ],
   providers: [
     {

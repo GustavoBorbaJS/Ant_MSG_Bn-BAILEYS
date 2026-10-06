@@ -15,7 +15,8 @@ export interface InstanceHealth extends HealthAssessment {
   phoneNumber?: string;
   displayName?: string;
   signals: HealthSignals;
-  // null = IA desligada (sem ANTHROPIC_API_KEY) ou indisponível nesta checagem
+  // null = quem pediu a checagem não tem IA configurada (menu "IA"), ou a IA
+  // falhou nesta checagem - aiEnabled diz qual dos dois
   ai: HealthAiDiagnosis | null;
   aiEnabled: boolean;
 }
@@ -25,7 +26,8 @@ const DAY_MS = 86_400_000;
 // Checagem de saúde de uma instância, em três passos:
 //   1. coleta os sinais (engine, anti-ban no Redis, entregas no banco)
 //   2. aplica as regras fixas -> nota, veredito e checagens (instance-health.rules.ts)
-//   3. opcionalmente pede um diagnóstico em texto pra IA (instance-health-advisor.service.ts)
+//   3. opcionalmente pede um diagnóstico em texto pra IA de quem pediu a
+//      checagem (instance-health-advisor.service.ts)
 // Tudo somente leitura: checar a saúde nunca envia mensagem nem mexe em
 // contador/aquecimento.
 @Injectable()
@@ -39,10 +41,10 @@ export class InstanceHealthService {
     private readonly advisor: InstanceHealthAdvisorService,
   ) {}
 
-  async check(instanceId: string): Promise<InstanceHealth> {
+  async check(instanceId: string, requesterId: string): Promise<InstanceHealth> {
     const signals = await this.collectSignals(instanceId);
     const assessment = assessInstanceHealth(signals);
-    const ai = await this.advisor.diagnose(signals, assessment);
+    const ai = await this.advisor.diagnose(requesterId, signals, assessment);
 
     return {
       instanceId,
@@ -54,7 +56,7 @@ export class InstanceHealthService {
       ...assessment,
       signals,
       ai,
-      aiEnabled: this.advisor.enabled,
+      aiEnabled: await this.advisor.isEnabledFor(requesterId),
     };
   }
 

@@ -18,6 +18,18 @@ export function DashboardIcon({ className }: IconProps) {
   );
 }
 
+export function SparklesIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M10 3.5 11.7 8a2 2 0 0 0 1.3 1.3l4.5 1.7-4.5 1.7a2 2 0 0 0-1.3 1.3L10 18.5 8.3 14A2 2 0 0 0 7 12.7L2.5 11 7 9.3A2 2 0 0 0 8.3 8L10 3.5zM18.5 3v4M16.5 5h4M19 16.5v4M17 18.5h4"
+      />
+    </svg>
+  );
+}
+
 export function InstancesIcon({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

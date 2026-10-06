@@ -3,6 +3,7 @@ import type { ChangeEvent, FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, campaignImageUrl } from '../lib/api';
 import type { Campaign, Contact, InstanceSummary, Paginated } from '../lib/api';
+import { SparklesIcon } from '../components/icons';
 import { Modal } from '../components/Modal';
 import { useCurrentUser } from '../lib/useCurrentUser';
 
@@ -216,6 +217,24 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  // "Melhorar com IA": só traz uma SUGESTÃO - o texto da campanha só muda se
+  // o operador clicar em "Usar este texto". Usa a IA configurada no menu "IA".
+  const aiMutation = useMutation({
+    mutationFn: async () =>
+      (await api.post<{ text: string }>('/ai/improve-text', { text, instruction: aiInstruction })).data,
+    onSuccess: (res) => {
+      setAiSuggestion(res.text);
+      setAiError(null);
+    },
+    onError: (err: any) => {
+      setAiSuggestion(null);
+      setAiError(err.response?.data?.message || 'Não foi possível usar a IA agora.');
+    },
+  });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -288,8 +307,58 @@ function CampaignFormModal({ campaign, onClose }: { campaign: Campaign | null; o
           onChange={(e) => setText(e.target.value)}
           required
           rows={4}
-          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          className="mb-2 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         />
+
+        <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50/60 p-2.5 dark:border-emerald-900/60 dark:bg-emerald-900/10">
+          <div className="flex gap-2">
+            <input
+              value={aiInstruction}
+              onChange={(e) => setAiInstruction(e.target.value)}
+              placeholder={text.trim() ? 'Como melhorar? (opcional) ex: mais curto e amigável' : 'O que a mensagem deve comunicar?'}
+              maxLength={1000}
+              className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            />
+            <button
+              type="button"
+              onClick={() => aiMutation.mutate()}
+              disabled={aiMutation.isPending || (!text.trim() && !aiInstruction.trim())}
+              className="flex shrink-0 items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+            >
+              <SparklesIcon className="h-4 w-4" />
+              {aiMutation.isPending ? 'Gerando...' : text.trim() ? 'Melhorar com IA' : 'Escrever com IA'}
+            </button>
+          </div>
+
+          {aiError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{aiError}</p>}
+
+          {aiSuggestion && (
+            <div className="mt-2">
+              <p className="whitespace-pre-wrap rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                {aiSuggestion}
+              </p>
+              <div className="mt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setText(aiSuggestion);
+                    setAiSuggestion(null);
+                  }}
+                  className="text-xs font-medium text-emerald-700 hover:text-emerald-900 dark:text-emerald-400 dark:hover:text-emerald-300"
+                >
+                  Usar este texto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiSuggestion(null)}
+                  className="text-xs text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  Descartar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <label className="mb-1 block text-sm text-gray-600 dark:text-gray-400">Imagem ou PDF (opcional)</label>
         {hasAttachment && (
