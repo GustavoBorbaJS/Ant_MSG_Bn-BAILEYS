@@ -11,6 +11,7 @@ import { MessageLog } from '../database/entities/message-log.entity';
 import { QueueProducerService } from '../queue/queue-producer.service';
 import { InstanceOwnersService, RequesterInfo } from '../instance-owners/instance-owners.service';
 import { SettingsService } from '../settings/settings.service';
+import { OptOutsService } from '../opt-outs/opt-outs.service';
 import { CreateCampaignDto, DispatchCampaignDto, DispatchMode, RetryFailedDto, UpdateCampaignDto } from './dto';
 
 type Progress = { pending: number; sent: number; failed: number };
@@ -29,6 +30,9 @@ interface OutgoingMessage {
   // ms até o job ficar elegível (agendamento/lotes do modo direto)
   delay?: number;
 }
+
+// limite de texto do /send do engine (ver SendDto em Ant_Engine_Bn/src/whatsapp/dto.ts)
+const MAX_MESSAGE_LENGTH = 4096;
 
 const ALLOWED_ATTACHMENT_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
@@ -50,6 +54,7 @@ export class CampaignsService {
     private readonly instanceOwners: InstanceOwnersService,
     private readonly configService: ConfigService,
     private readonly settingsService: SettingsService,
+    private readonly optOuts: OptOutsService,
   ) {}
 
   private uploadsDir(): string {
@@ -232,6 +237,18 @@ export class CampaignsService {
     return { imageUrl, documentFileName: `${safeName}.pdf` };
   }
 
+  // Soma o convite de saída ("Responda: Não tenho interesse") ao texto da
+  // campanha - dar uma saída fácil é o que evita a pessoa apertar "Denunciar".
+  // Fica de fora se o rodapé estiver desligado ou se estourasse o limite do
+  // engine (melhor mandar sem rodapé do que falhar o envio).
+  private withOptOutFooter(text: string): string {
+    const footer = this.configService.get<string>('optOut.footer');
+    if (!footer) return text;
+
+    const withFooter = `${text}\n\n${footer}`;
+    return withFooter.length <= MAX_MESSAGE_LENGTH ? withFooter : text;
+  }
+
   // Unidade de disparo: grava a message_log 'pending' e enfileira o job
   // correspondente. Devolve o id da message_log.
   private async createAndEnqueue(message: OutgoingMessage): Promise<string> {
@@ -300,8 +317,19 @@ export class CampaignsService {
     // no 1o lote). repeatCount > 1 repete a lista inteira ANTES da divisão em
     // lotes, entao tudo abaixo (validação de lote, limite diário) já opera
     // sobre o total final de mensagens, repetição incluída.
+    //
+    // Quem pediu pra não receber mais ("Não tenho interesse") sai da lista
+    // aqui, antes de qualquer conta - vale pra todos os modos, inclusive o
+    // direto: o modo direto abre mão do anti-ban, não do pedido da pessoa.
     const contactsById = new Map(contacts.map((c) => [c.id, c]));
-    const baseOrderedContacts = dto.contactIds.map((cid) => contactsById.get(cid)!);
+    const { allowed: baseOrderedContacts, optedOut } = await this.optOuts.partition(
+      requester.id,
+      dto.contactIds.map((cid) => contactsById.get(cid)!),
+      (contact) => contact.phone,
+    );
+    if (baseOrderedContacts.length === 0) {
+      throw new BadRequestException('Todos os contatos selecionados pediram para não receber mais mensagens.');
+    }
     const orderedContacts =
       repeatCount > 1 ? Array.from({ length: repeatCount }, () => baseOrderedContacts).flat() : baseOrderedContacts;
 
@@ -326,8 +354,11 @@ export class CampaignsService {
       const totalBatched = batchSizes.reduce((sum, n) => sum + n, 0);
       if (totalBatched !== orderedContacts.length) {
         const repeatNote = repeatCount > 1 ? ` (já com a repetição x${repeatCount} aplicada)` : '';
+        const optOutNote = optedOut.length
+          ? ` ${optedOut.length} contato(s) foram retirados por terem pedido para não receber mais.`
+          : '';
         throw new BadRequestException(
-          `A soma dos lotes (${totalBatched}) precisa ser igual ao total de mensagens (${orderedContacts.length}${repeatNote}).`,
+          `A soma dos lotes (${totalBatched}) precisa ser igual ao total de mensagens (${orderedContacts.length}${repeatNote}).${optOutNote}`,
         );
       }
 
@@ -349,6 +380,7 @@ export class CampaignsService {
     const scheduleDelayMs = scheduledAt ? Math.max(0, scheduledAt.getTime() - Date.now()) : 0;
 
     const attachment = this.resolveAttachment(campaign);
+    const text = this.withOptOutFooter(campaign.text);
 
     const messageLogIds: string[] = [];
     let cursor = 0;
@@ -363,7 +395,7 @@ export class CampaignsService {
             campaignId: campaign.id,
             instanceId: dto.instanceId,
             to: contact.phone,
-            text: campaign.text,
+            text,
             contactId: contact.id,
             mode,
             dispatchedBy: requester.id,
@@ -406,6 +438,7 @@ export class CampaignsService {
       batchSizes,
       repeatCount,
       scheduledAt: scheduledAt?.toISOString() ?? null,
+      skippedOptOut: optedOut.length,
     };
   }
 
@@ -423,13 +456,19 @@ export class CampaignsService {
 
     await this.instanceOwners.assertAccess(dto.instanceId, requester);
 
-    const failedLogs = await this.messageLogRepo.find({
+    const allFailedLogs = await this.messageLogRepo.find({
       where: { campaignId: campaign.id, status: 'failed', dispatchedBy: requester.id },
       order: { createdAt: 'ASC' },
     });
 
-    if (failedLogs.length === 0) {
+    if (allFailedLogs.length === 0) {
       throw new BadRequestException('Não há mensagens falhadas pra reenviar nessa campanha.');
+    }
+
+    // quem pediu pra sair depois da tentativa original não recebe o reenvio
+    const { allowed: failedLogs, optedOut } = await this.optOuts.partition(requester.id, allFailedLogs, (log) => log.to);
+    if (failedLogs.length === 0) {
+      throw new BadRequestException('Todos os contatos com falha pediram para não receber mais mensagens.');
     }
 
     if (requester.role !== 'admin') {
@@ -462,6 +501,6 @@ export class CampaignsService {
         `total=${messageLogIds.length}`,
     );
 
-    return { retried: messageLogIds.length, messageLogIds };
+    return { retried: messageLogIds.length, messageLogIds, skippedOptOut: optedOut.length };
   }
 }

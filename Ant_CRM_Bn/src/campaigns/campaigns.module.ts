@@ -8,6 +8,7 @@ import { CampaignsService } from './campaigns.service';
 import { QueueModule } from '../queue/queue.module';
 import { InstanceOwnersModule } from '../instance-owners/instance-owners.module';
 import { SettingsModule } from '../settings/settings.module';
+import { OptOutsModule } from '../opt-outs/opt-outs.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { SettingsModule } from '../settings/settings.module';
     QueueModule,
     InstanceOwnersModule,
     SettingsModule,
+    OptOutsModule,
   ],
   controllers: [CampaignsController],
   providers: [CampaignsService],

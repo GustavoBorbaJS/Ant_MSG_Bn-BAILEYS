@@ -78,6 +78,8 @@ export interface Contact {
   phone: string;
   tags: string[];
   notes: string | null;
+  // pediu pra não receber mais ("Não tenho interesse") - fica fora dos disparos
+  optedOut: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -47,6 +47,8 @@ O worker atualiza a `message_log` para `sent` ou `failed`; o painel lê o progre
 | Disparo, lotes, agendamento, reenvio de falhas | `Ant_CRM_Bn/src/campaigns/campaigns.service.ts` |
 | Checagem de saúde da instância (regras e pesos) | `Ant_CRM_Bn/src/instances/instance-health.rules.ts` |
 | Diagnóstico por IA da saúde (prompt, modelo) | `Ant_CRM_Bn/src/instances/instance-health-advisor.service.ts` |
+| Opt-out: frases aceitas como pedido de saída | `Ant_Engine_Bn/src/whatsapp/opt-out.ts` |
+| Opt-out: lista de quem saiu, filtro no disparo, rodapé | `Ant_CRM_Bn/src/opt-outs/`, `CampaignsService.withOptOutFooter` |
 | Posse de instância por usuário | `Ant_CRM_Bn/src/instance-owners/instance-owners.service.ts` |
 | Política de anti-ban editável no painel | `Ant_CRM_Bn/src/settings/settings.service.ts` |
 | Schema do banco | `Ant_CRM_Bn/src/database/migrations/` (só o CRM migra) |
@@ -65,11 +67,13 @@ Cada uma existe por um incidente ou risco real; o motivo está junto para você 
 7. **`messageLogId` é a chave de idempotência do envio.** O engine reaproveita a chamada em andamento em vez de mandar duas vezes quando o worker retenta após timeout.
 8. **Tudo no CRM é filtrado por dono.** Campanhas e contatos por `ownerId`; instâncias por `InstanceOwnersService.assertAccess`. Endpoint novo que recebe `instanceId` chama `assertAccess` antes de qualquer coisa.
 9. **`instanceId` vira pasta em disco e chave do Redis.** Sempre validado por `^[a-zA-Z0-9_-]{1,64}$` antes de usar (path traversal).
-10. **Contratos duplicados andam juntos.** Não há pacote compartilhado, então estes pares são cópias manuais; mudou um, mude o outro no mesmo commit:
+10. **Quem pediu pra sair não recebe, em nenhum modo.** Todo caminho que enfileira mensagem passa a lista por `OptOutsService.partition` antes (hoje: `dispatch` e `retryFailed`). O modo direto abre mão do anti-ban, não do pedido da pessoa. Telefone se compara por `toPhoneKey`, nunca cru: o WhatsApp devolve celular brasileiro sem o nono dígito.
+11. **Contratos duplicados andam juntos.** Não há pacote compartilhado, então estes pares são cópias manuais; mudou um, mude o outro no mesmo commit:
     - `MessageJobData`: `Ant_CRM_Bn/src/queue/queue-producer.service.ts` ↔ `Ant_MSG_Bn/src/queue/queue.consumer.ts`
     - `defaultJobOptions` da fila: `queue-producer.service.ts` ↔ `Ant_MSG_Bn/src/queue/queue.module.ts`
     - entidade `message_logs`: uma em cada backend (o worker só toca status, datas e erro)
     - limites e dias de aquecimento: `configuration.ts` do worker ↔ do CRM
+    - frase de saída: rodapé `OPT_OUT_FOOTER` (CRM) ↔ `OPT_OUT_PHRASES` em `Ant_Engine_Bn/src/whatsapp/opt-out.ts`
     - relatório de saúde: `Ant_Engine_Bn/src/common/instance-health.ts` ↔ `EngineHealthReport` em `instance-health.rules.ts` ↔ `InstanceHealth` em `Ant_CRM_Web/src/lib/api.ts`
 
 ## Como o espaçamento funciona
@@ -84,6 +88,19 @@ Um envio é concedido quando não há pausa do provedor, nenhum contador (minuto
 O modo direto (`skipRateLimit`) pula tudo isso, menos a pausa do provedor.
 
 Chaves: `antiban:{id}:firstSeen`, `:minute:{bucket}`, `:hour:{bucket}`, `:day:{bucket}`, `:nextSlot`, `:softCursor`, `:cooldown`, `:cooldownStrikes`, mais `antiban:global:day:{bucket}` e `antiban:config`. Se a fila for apagada à mão, apague também `antiban:{id}:softCursor`, senão os próximos jobs esperam por uma fila que não existe mais.
+
+## Como o opt-out funciona
+
+```
+campanha sai com o rodapé "Responda: Não tenho interesse"   (CampaignsService.withOptOutFooter)
+pessoa responde ─▶ engine · OptOutService.handleUpsert      (só repassa o que É pedido de saída)
+        │  POST /internal/opt-outs + Bearer ENGINE_API_KEY  (única chamada engine → CRM)
+        ▼
+crm-api · OptOutsService.registerReply ─▶ tabela opt_outs (ownerId do dono da instância, phoneKey)
+próximo disparo ─▶ OptOutsService.partition tira esse número da lista
+```
+
+O bloqueio vale por usuário (dono da instância que recebeu a resposta) e fica em tabela própria, então sobrevive a apagar e reimportar o contato. O operador também marca e desmarca à mão na tela de contatos. Mensagens já enfileiradas antes da resposta não são canceladas. Só instâncias Baileys escutam respostas; a Meta Cloud API precisaria de um webhook público, que não existe.
 
 ## Como o código daqui é escrito
 

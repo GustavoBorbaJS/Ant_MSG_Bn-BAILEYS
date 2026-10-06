@@ -44,6 +44,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       META_API_VERSION: ${META_API_VERSION:-v21.0}
       META_INSTANCES: ${META_INSTANCES:-}
+      # opt-out ("Não tenho interesse"): o engine avisa o crm-api quando alguém
+      # responde pedindo pra sair
+      CRM_INTERNAL_URL: http://crm-api:3002
+      OPT_OUT_CONFIRMATION: ${OPT_OUT_CONFIRMATION:-}
     volumes:
       - antiban_engine_sessions:/app/sessions
 
@@ -76,6 +80,8 @@ services:
       CRM_ADMIN_PASSWORD_HASH: ${CRM_ADMIN_PASSWORD_HASH}
       CRM_JWT_SECRET: ${CRM_JWT_SECRET}
       CRM_JWT_EXPIRES_IN: ${CRM_JWT_EXPIRES_IN:-24h}
+      # rodapé de saída somado às mensagens de campanha (vazio = texto padrão, "off" = sem rodapé)
+      OPT_OUT_FOOTER: ${OPT_OUT_FOOTER:-}
       # opcional - diagnóstico por IA na checagem de saúde da instância
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       HEALTH_AI_MODEL: ${HEALTH_AI_MODEL:-claude-opus-5-5}

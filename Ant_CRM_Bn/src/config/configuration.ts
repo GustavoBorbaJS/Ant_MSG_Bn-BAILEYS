@@ -1,3 +1,10 @@
+const DEFAULT_OPT_OUT_FOOTER = 'Não quer mais receber nossas mensagens? Responda: Não tenho interesse';
+
+function resolveOptOutFooter(raw: string | undefined): string {
+  if (!raw?.trim()) return DEFAULT_OPT_OUT_FOOTER;
+  return raw.trim().toLowerCase() === 'off' ? '' : raw.trim();
+}
+
 export default () => ({
   port: parseInt(process.env.CRM_PORT, 10) || 3002,
   // onde as imagens de campanha ficam salvas em disco (precisa de volume
@@ -38,6 +45,13 @@ export default () => ({
     apiUrl: process.env.ENGINE_API_URL || 'http://localhost:3001',
     // precisa ser IGUAL ao ENGINE_API_KEY do Ant_Engine_Bn/.env
     apiKey: process.env.ENGINE_API_KEY || '',
+  },
+  // Rodapé somado a toda mensagem de campanha, convidando a pessoa a sair da
+  // lista em vez de denunciar o número. O texto precisa bater com o que o
+  // engine reconhece como pedido de saída (ver OPT_OUT_PHRASES em
+  // Ant_Engine_Bn/src/whatsapp/opt-out.ts). OPT_OUT_FOOTER=off desliga.
+  optOut: {
+    footer: resolveOptOutFooter(process.env.OPT_OUT_FOOTER),
   },
   // Diagnóstico por IA na checagem de saúde da instância (opcional - ver
   // instances/instance-health-advisor.service.ts). Sem ANTHROPIC_API_KEY a

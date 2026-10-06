@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Contact } from '../database/entities/contact.entity';
 import { CreateContactDto, UpdateContactDto } from './dto';
+import { OptOutsService } from '../opt-outs/opt-outs.service';
 
 export interface ImportContactsResult {
   received: number;
@@ -28,6 +29,7 @@ export class ContactsService {
   constructor(
     @InjectRepository(Contact)
     private readonly contactRepo: Repository<Contact>,
+    private readonly optOuts: OptOutsService,
   ) {}
 
   async list(ownerId: string, search?: string, tag?: string, page = 1, pageSize = 50) {
@@ -44,8 +46,26 @@ export class ContactsService {
       .skip((page - 1) * pageSize)
       .take(pageSize);
 
-    const [items, total] = await qb.getManyAndCount();
+    const [contacts, total] = await qb.getManyAndCount();
+
+    // optedOut = pediu pra não receber mais (ver OptOutsService) - a tela usa
+    // pra sinalizar o contato e tirá-lo da seleção de disparo
+    const { optedOut } = await this.optOuts.partition(ownerId, contacts, (contact) => contact.phone);
+    const optedOutIds = new Set(optedOut.map((contact) => contact.id));
+    const items = contacts.map((contact) => ({ ...contact, optedOut: optedOutIds.has(contact.id) }));
+
     return { items, total, page, pageSize };
+  }
+
+  // Marca/desmarca à mão o "não tenho interesse" de um contato (o caminho
+  // automático é a resposta no WhatsApp - ver OptOutsService.registerReply).
+  async setOptedOut(id: string, ownerId: string, optedOut: boolean): Promise<void> {
+    const contact = await this.findOne(id, ownerId);
+    if (optedOut) {
+      await this.optOuts.optOut(ownerId, contact.phone);
+    } else {
+      await this.optOuts.optIn(ownerId, contact.phone);
+    }
   }
 
   async findOne(id: string, ownerId: string): Promise<Contact> {

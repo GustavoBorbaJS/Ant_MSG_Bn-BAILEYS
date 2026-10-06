@@ -9,6 +9,7 @@ import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, WASocket } f
 import { useEncryptedMultiFileAuthState } from './encrypted-auth-state';
 import { InstanceNotConnectedError, InvalidRecipientError, ProviderRateLimitError } from './errors';
 import { InstanceHealthReport, InstanceTelemetry } from '../common/instance-health';
+import { OptOutService } from './opt-out.service';
 
 export type InstanceStatus = 'connecting' | 'qr_code' | 'pairing_code' | 'connected' | 'disconnected';
 
@@ -42,7 +43,10 @@ export class WhatsappService implements OnModuleDestroy {
   private readonly telemetry = new InstanceTelemetry();
   private static readonly HEALTH_PROBE_TIMEOUT_MS = 10_000;
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService,
+    private optOutService: OptOutService,
+  ) {}
 
   onModuleDestroy() {
     for (const { sock } of this.instances.values()) {
@@ -90,6 +94,9 @@ export class WhatsappService implements OnModuleDestroy {
     this.instances.set(instanceId, record);
 
     sock.ev.on('creds.update', saveCreds);
+
+    // respostas recebidas: só interessa quem pede pra sair da lista
+    sock.ev.on('messages.upsert', (upsert) => this.optOutService.handleUpsert(instanceId, sock, upsert));
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;

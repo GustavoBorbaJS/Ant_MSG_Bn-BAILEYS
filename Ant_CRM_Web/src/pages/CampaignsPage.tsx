@@ -405,10 +405,13 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
+      const skippedNote = res.data.skippedOptOut
+        ? ` ${res.data.skippedOptOut} contato(s) ficaram de fora por terem pedido para não receber mais.`
+        : '';
       setResult(
-        res.data.scheduledAt
+        (res.data.scheduledAt
           ? `${res.data.dispatched} mensagem(ns) agendada(s) para ${new Date(res.data.scheduledAt).toLocaleString('pt-BR')}.`
-          : `${res.data.dispatched} mensagem(ns) enfileirada(s).`,
+          : `${res.data.dispatched} mensagem(ns) enfileirada(s).`) + skippedNote,
       );
       setError(null);
     },
@@ -424,13 +427,16 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
     });
   }
 
-  const allContactsSelected = !!contactsPage?.items.length && contactsPage.items.every((c) => selectedIds.has(c.id));
+  // quem pediu pra não receber mais aparece na lista, mas não é selecionável
+  // (o backend também barra - ver CampaignsService.dispatch)
+  const selectableContacts = contactsPage?.items.filter((c) => !c.optedOut) ?? [];
+  const allContactsSelected = selectableContacts.length > 0 && selectableContacts.every((c) => selectedIds.has(c.id));
 
   function toggleAll() {
     if (allContactsSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(contactsPage?.items.map((c) => c.id) ?? []));
+      setSelectedIds(new Set(selectableContacts.map((c) => c.id)));
     }
   }
 
@@ -471,7 +477,7 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         <label className="block text-sm text-gray-600 dark:text-gray-400">
           Contatos ({selectedIds.size} selecionado{selectedIds.size === 1 ? '' : 's'})
         </label>
-        {!!contactsPage?.items.length && (
+        {selectableContacts.length > 0 && (
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
             <input type="checkbox" checked={allContactsSelected} onChange={toggleAll} />
             Selecionar todos
@@ -482,10 +488,18 @@ function DispatchModal({ campaign, onClose }: { campaign: Campaign; onClose: () 
         {contactsPage?.items.map((contact) => (
           <label
             key={contact.id}
-            className="flex cursor-pointer items-center gap-2 border-b border-gray-100 px-3 py-1.5 text-sm last:border-0 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
+            className={`flex items-center gap-2 border-b border-gray-100 px-3 py-1.5 text-sm last:border-0 dark:border-gray-800 ${
+              contact.optedOut ? 'opacity-50' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800'
+            }`}
           >
-            <input type="checkbox" checked={selectedIds.has(contact.id)} onChange={() => toggle(contact.id)} />
+            <input
+              type="checkbox"
+              disabled={contact.optedOut}
+              checked={selectedIds.has(contact.id)}
+              onChange={() => toggle(contact.id)}
+            />
             <span className="text-gray-900 dark:text-gray-100">{contact.name}</span>
+            {contact.optedOut && <span className="text-xs text-red-600 dark:text-red-400">não tem interesse</span>}
             <span className="ml-auto font-mono text-xs text-gray-400 dark:text-gray-500">{contact.phone}</span>
           </label>
         ))}

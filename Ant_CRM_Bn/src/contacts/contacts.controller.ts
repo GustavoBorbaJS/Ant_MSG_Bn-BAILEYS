@@ -37,6 +37,16 @@ export class ContactsController {
     return this.contactsService.update(id, dto, req.user.sub);
   }
 
+  @Post(':id/opt-out')
+  optOut(@Param('id') id: string, @Req() req: any) {
+    return this.contactsService.setOptedOut(id, req.user.sub, true);
+  }
+
+  @Delete(':id/opt-out')
+  optIn(@Param('id') id: string, @Req() req: any) {
+    return this.contactsService.setOptedOut(id, req.user.sub, false);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string, @Req() req: any) {
     return this.contactsService.remove(id, req.user.sub);

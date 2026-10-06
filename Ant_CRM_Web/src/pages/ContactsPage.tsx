@@ -22,6 +22,13 @@ export function ContactsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['contacts'] }),
   });
 
+  const optOutMutation = useMutation({
+    mutationFn: (contact: Contact) =>
+      contact.optedOut ? api.delete(`/contacts/${contact.id}/opt-out`) : api.post(`/contacts/${contact.id}/opt-out`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['contacts'] }),
+    onError: (err: any) => alert(err.response?.data?.message || 'Não foi possível atualizar o contato.'),
+  });
+
   const importMutation = useMutation({
     mutationFn: (phones: string[]) => api.post<ImportContactsResult>('/contacts/import', { phones }),
     onSuccess: (res) => {
@@ -34,6 +41,15 @@ export function ContactsPage() {
   function handleDelete(contact: Contact) {
     if (confirm(`Remover o contato "${contact.name}"?`)) {
       deleteMutation.mutate(contact.id);
+    }
+  }
+
+  function handleToggleOptOut(contact: Contact) {
+    const question = contact.optedOut
+      ? `"${contact.name}" pediu para não receber mais mensagens. Voltar a enviar para esse contato?`
+      : `Parar de enviar mensagens para "${contact.name}"?`;
+    if (confirm(question)) {
+      optOutMutation.mutate(contact);
     }
   }
 
@@ -125,7 +141,14 @@ export function ContactsPage() {
           <tbody>
             {data?.items.map((contact) => (
               <tr key={contact.id} className="border-t border-gray-100 dark:border-gray-800">
-                <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{contact.name}</td>
+                <td className="px-4 py-2 text-gray-900 dark:text-gray-100">
+                  {contact.name}
+                  {contact.optedOut && (
+                    <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/40 dark:text-red-400">
+                      Não tem interesse
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2 font-mono text-gray-700 dark:text-gray-300">{contact.phone}</td>
                 <td className="px-4 py-2">
                   {contact.tags.map((tag) => (
@@ -143,6 +166,12 @@ export function ContactsPage() {
                     className="mr-2 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
                   >
                     Editar
+                  </button>
+                  <button
+                    onClick={() => handleToggleOptOut(contact)}
+                    className="mr-2 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                  >
+                    {contact.optedOut ? 'Voltar a enviar' : 'Não enviar mais'}
                   </button>
                   <button
                     onClick={() => handleDelete(contact)}
