@@ -6,7 +6,7 @@ import axios from 'axios';
 // Provedor novo = mais um item em AI_PROVIDERS implementando AiProvider; o
 // resto do sistema (AiService, saúde da instância, campanhas) não muda.
 
-export type AiProviderId = 'anthropic' | 'openai' | 'gemini';
+export type AiProviderId = 'anthropic' | 'openai' | 'gemini' | 'deepseek' | 'zai';
 
 export interface AiModelOption {
   id: string;
@@ -117,7 +117,7 @@ const anthropic: AiProvider = {
   },
 };
 
-// ------------------------------------------------------- OpenAI e Gemini (REST)
+// ------------------------------------------- Provedores por REST (sem SDK)
 
 function toHttpError(providerLabel: string, error: any): AiProviderError {
   const status: number | undefined = error.response?.status;
@@ -132,51 +132,151 @@ function toHttpError(providerLabel: string, error: any): AiProviderError {
   return new AiProviderError(`A ${providerLabel} recusou a requisição${status ? ` (${status})` : ''}: ${detail}`, 'unavailable');
 }
 
-// /v1/models da OpenAI devolve tudo que a conta acessa (áudio, imagem,
-// embeddings...) - aqui só interessa o que conversa por texto.
-const OPENAI_NON_CHAT = /embedding|whisper|tts|dall-e|image|audio|realtime|moderation|transcribe|search|instruct|davinci|babbage|sora|codex/i;
+interface OpenAiCompatibleOptions {
+  id: AiProviderId;
+  label: string;
+  keyUrl: string;
+  keyPlaceholder: string;
+  // Um ou mais endereços que falam o protocolo da OpenAI. Mais de um quando o
+  // provedor separa as chaves por plano em endereços diferentes: tenta na
+  // ordem e fica com o primeiro que aceitar a chave.
+  baseUrls: string[];
+  // tira da lista o que não conversa por texto (áudio, imagem, embeddings...)
+  excludeModels?: RegExp;
+  // usada quando o provedor não tem (ou a chave não alcança) a rota de
+  // listagem de modelos
+  fallbackModels?: string[];
+}
 
-const openai: AiProvider = {
+// Falha que vale tentar no próximo endereço: a chave pode ser do outro plano
+// (o provedor responde 401, 403 ou "sem saldo/pacote" com 4xx). Erro de rede
+// ou 5xx é instabilidade, e o outro endereço cairia igual.
+function isWrongEndpointError(error: any): boolean {
+  const status: number | undefined = error.response?.status;
+  return status !== undefined && status >= 400 && status < 500;
+}
+
+// Provedor que expõe a API no formato da OpenAI (/models e
+// /chat/completions com Bearer). OpenAI, DeepSeek e Z.ai (GLM) entram aqui -
+// mudam o endereço, o nome e pequenos detalhes de listagem.
+function openAiCompatible(options: OpenAiCompatibleOptions): AiProvider {
+  const { id, label, keyUrl, keyPlaceholder, baseUrls, excludeModels, fallbackModels } = options;
+
+  // Chama cada endereço na ordem; devolve o primeiro que der certo. Se todos
+  // falharem, o erro mostrado é o do PRIMEIRO (o endereço principal).
+  async function onFirstWorkingBase<T>(call: (baseUrl: string) => Promise<T>): Promise<T> {
+    let firstError: unknown;
+    for (const baseUrl of baseUrls) {
+      try {
+        return await call(baseUrl);
+      } catch (error) {
+        firstError ??= error;
+        if (!isWrongEndpointError(error)) break;
+      }
+    }
+    throw firstError;
+  }
+
+  return {
+    id,
+    label,
+    keyUrl,
+    keyPlaceholder,
+    defaultModel: null,
+
+    async listModels(apiKey) {
+      try {
+        const data = await onFirstWorkingBase(
+          async (baseUrl) =>
+            (await axios.get(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: REQUEST_TIMEOUT_MS }))
+              .data,
+        );
+        return (data.data as { id: string; name?: string }[])
+          .filter((model) => !excludeModels?.test(model.id))
+          .map((model) => ({ id: model.id, label: model.name || model.id }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+      } catch (error) {
+        const status: number | undefined = (error as any).response?.status;
+        // chave recusada continua sendo erro; só a AUSÊNCIA da rota de
+        // listagem cai na lista fixa
+        if (fallbackModels && status !== 401 && status !== 403) {
+          return fallbackModels.map((model) => ({ id: model, label: model }));
+        }
+        throw toHttpError(label, error);
+      }
+    },
+
+    async complete({ apiKey, model, system, user }) {
+      try {
+        const data = await onFirstWorkingBase(
+          async (baseUrl) =>
+            (
+              await axios.post(
+                `${baseUrl}/chat/completions`,
+                {
+                  model,
+                  messages: [
+                    { role: 'system', content: system },
+                    { role: 'user', content: user },
+                  ],
+                },
+                { headers: { Authorization: `Bearer ${apiKey}` }, timeout: REQUEST_TIMEOUT_MS },
+              )
+            ).data,
+        );
+        return String(data.choices?.[0]?.message?.content ?? '').trim();
+      } catch (error) {
+        throw toHttpError(label, error);
+      }
+    },
+  };
+}
+
+const openai = openAiCompatible({
   id: 'openai',
   label: 'OpenAI (ChatGPT)',
   keyUrl: 'https://platform.openai.com/api-keys',
   keyPlaceholder: 'sk-...',
-  defaultModel: null,
+  baseUrls: ['https://api.openai.com/v1'],
+  // /v1/models da OpenAI devolve tudo que a conta acessa
+  excludeModels: /embedding|whisper|tts|dall-e|image|audio|realtime|moderation|transcribe|search|instruct|davinci|babbage|sora|codex/i,
+});
 
-  async listModels(apiKey) {
-    try {
-      const { data } = await axios.get('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        timeout: REQUEST_TIMEOUT_MS,
-      });
-      return (data.data as { id: string }[])
-        .filter((model) => !OPENAI_NON_CHAT.test(model.id))
-        .map((model) => ({ id: model.id, label: model.id }))
-        .sort((a, b) => a.id.localeCompare(b.id));
-    } catch (error) {
-      throw toHttpError('OpenAI', error);
-    }
-  },
+const deepseek = openAiCompatible({
+  id: 'deepseek',
+  label: 'DeepSeek',
+  keyUrl: 'https://platform.deepseek.com/api_keys',
+  keyPlaceholder: 'sk-...',
+  baseUrls: ['https://api.deepseek.com'],
+});
 
-  async complete({ apiKey, model, system, user }) {
-    try {
-      const { data } = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
-        {
-          model,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-        },
-        { headers: { Authorization: `Bearer ${apiKey}` }, timeout: REQUEST_TIMEOUT_MS },
-      );
-      return String(data.choices?.[0]?.message?.content ?? '').trim();
-    } catch (error) {
-      throw toHttpError('OpenAI', error);
-    }
-  },
-};
+// A Z.ai tem dois endereços e a chave só funciona no do plano dela: o geral
+// (pago por uso) e o do GLM Coding Plan (assinatura). A documentação dela não
+// traz rota de listagem de modelos, então a lista abaixo (página de preços da
+// Z.ai) entra quando /models não responde - e a tela ainda deixa digitar
+// outro nome de modelo, pra não depender desta lista estar em dia.
+const zai = openAiCompatible({
+  id: 'zai',
+  label: 'Z.ai (GLM)',
+  keyUrl: 'https://z.ai/manage-apikey/apikey-list',
+  keyPlaceholder: 'chave da Z.ai',
+  baseUrls: ['https://api.z.ai/api/paas/v4', 'https://api.z.ai/api/coding/paas/v4'],
+  fallbackModels: [
+    'glm-5.3',
+    'glm-5.3-flash',
+    'glm-5.3-flashx',
+    'glm-5.2',
+    'glm-5.1',
+    'glm-5',
+    'glm-4.7',
+    'glm-4.7-flash',
+    'glm-4.7-flashx',
+    'glm-4.6',
+    'glm-4.5',
+    'glm-4.5-air',
+    'glm-4.5-flash',
+  ],
+});
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -225,7 +325,7 @@ const gemini: AiProvider = {
   },
 };
 
-export const AI_PROVIDERS: Record<AiProviderId, AiProvider> = { anthropic, openai, gemini };
+export const AI_PROVIDERS: Record<AiProviderId, AiProvider> = { anthropic, openai, gemini, deepseek, zai };
 
 export function isAiProviderId(value: string): value is AiProviderId {
   return value in AI_PROVIDERS;

@@ -35,6 +35,8 @@ function AiSettingsForm({ settings }: { settings: AiSettings }) {
   const [showKey, setShowKey] = useState(false);
   const [model, setModel] = useState(saved?.model ?? '');
   const [models, setModels] = useState<AiModelOption[]>([]);
+  // digitar o nome do modelo à mão, pra quando ele não aparece na lista
+  const [customModel, setCustomModel] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   const providerInfo = settings.providers.find((p) => p.id === provider);
@@ -49,7 +51,11 @@ function AiSettingsForm({ settings }: { settings: AiSettings }) {
       if (!list.some((m) => m.id === model)) {
         setModel(list.find((m) => m.id === providerInfo?.defaultModel)?.id ?? list[0]?.id ?? '');
       }
-      setFeedback({ kind: 'ok', text: `Chave válida: ${list.length} modelo(s) disponível(is). Escolha um e salve.` });
+      setCustomModel(false);
+      setFeedback({
+        kind: 'ok',
+        text: `${list.length} modelo(s) disponível(is). Escolha um, salve e use "Testar conexão" para confirmar.`,
+      });
     },
     onError: (err) => {
       setModels([]);
@@ -92,6 +98,7 @@ function AiSettingsForm({ settings }: { settings: AiSettings }) {
     setProvider(id);
     setApiKey('');
     setModels([]);
+    setCustomModel(false);
     setModel(settings.source === 'user' && settings.provider === id ? (settings.model ?? '') : '');
     setFeedback(null);
   }
@@ -126,7 +133,7 @@ function AiSettingsForm({ settings }: { settings: AiSettings }) {
         <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           Provedor
         </span>
-        <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {settings.providers.map((p) => (
             <button
               key={p.id}
@@ -190,20 +197,32 @@ function AiSettingsForm({ settings }: { settings: AiSettings }) {
           Modelo
         </label>
         <div className="mb-5 flex flex-col gap-2 sm:flex-row">
-          <select
-            id="ai-model"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            disabled={modelOptions.length === 0}
-            className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-800/50"
-          >
-            {modelOptions.length === 0 && <option value="">Busque os modelos da sua chave</option>}
-            {modelOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label === m.id ? m.id : `${m.label} (${m.id})`}
-              </option>
-            ))}
-          </select>
+          {customModel ? (
+            <input
+              id="ai-model"
+              value={model}
+              onChange={(e) => setModel(e.target.value.trim())}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="nome exato do modelo, ex: glm-5.3"
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 font-mono text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            />
+          ) : (
+            <select
+              id="ai-model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={modelOptions.length === 0}
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-800/50"
+            >
+              {modelOptions.length === 0 && <option value="">Busque os modelos da sua chave</option>}
+              {modelOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label === m.id ? m.id : `${m.label} (${m.id})`}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             onClick={() => modelsMutation.mutate()}
@@ -213,6 +232,15 @@ function AiSettingsForm({ settings }: { settings: AiSettings }) {
             {modelsMutation.isPending ? 'Buscando...' : 'Buscar modelos'}
           </button>
         </div>
+        <p className="-mt-3 mb-5 text-xs text-gray-400 dark:text-gray-500">
+          <button
+            type="button"
+            onClick={() => setCustomModel((v) => !v)}
+            className="text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-400"
+          >
+            {customModel ? 'Escolher da lista' : 'Meu modelo não está na lista'}
+          </button>
+        </p>
 
         {feedback && (
           <p

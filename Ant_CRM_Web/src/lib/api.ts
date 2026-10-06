@@ -42,7 +42,7 @@ export interface InstanceUsage {
   used: { minute: number; hour: number; day: number };
 }
 
-export type AiProviderId = 'anthropic' | 'openai' | 'gemini';
+export type AiProviderId = 'anthropic' | 'openai' | 'gemini' | 'deepseek' | 'zai';
 
 export interface AiModelOption {
   id: string;
